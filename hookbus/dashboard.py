@@ -12,7 +12,7 @@ as the bus (port 18800 by default). Routes:
 Subscribers are external plug-ins, configured via subscribers.yaml,
 running as separate processes or containers. The bus connects to them
 by name. To add one: edit ~/.hookbus/subscribers.yaml and SIGHUP the
-bus. See https://agenticthinking.uk/spec for the envelope protocol.
+bus. See HOOKBUS_SPEC.md in the public repo for the envelope protocol.
 """
 
 from __future__ import annotations
@@ -288,9 +288,10 @@ footer a{color:var(--blue);text-decoration:none}
       Subscribers are external plug-ins. To <strong>add or remove</strong> one, edit
       <code>subscribers.yaml</code> and restart the bus:
       <code>docker compose restart hookbus</code>.
-      Hot-reload without restart is available in
-      <a href="https://agenticthinking.uk/enterprise" style="color:var(--blue)">HookBus Enterprise</a>.
-      See <a href="https://agenticthinking.uk/spec" style="color:var(--blue)">/spec</a> for the envelope protocol, or
+      Hot-reload without restart is a HookBus Enterprise feature
+      (<a href="mailto:hello@agenticthinking.uk?subject=HookBus%20Enterprise" style="color:var(--blue)">contact us</a>).
+      See <a href="https://github.com/agentic-thinking/hookbus/blob/main/HOOKBUS_SPEC.md" style="color:var(--blue)">HOOKBUS_SPEC.md</a>
+      for the envelope protocol, or
       <a href="https://github.com/agentic-thinking/hookbus/discussions" style="color:var(--blue)">join the community</a>
       to share a subscriber you have built.
     </div>
