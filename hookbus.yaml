@@ -1,0 +1,22 @@
+# HookBus Subscriber Configuration
+# 
+# This file defines all subscribers that receive events from the bus.
+# Bus address: http://localhost:18800/event
+#
+# Subscriber types:
+#   - sync: Blocks execution until response (returns allow/deny/ask)
+#   - async: Fire and forget, no response expected
+#
+# Transport types:
+#   - unix_socket: Unix domain socket at specified path
+#   - http: HTTP endpoint URL
+#   - in_process: Python class loaded directly by the bus
+#
+# Decision consolidation: deny > ask > allow
+# If any sync subscriber returns deny, the entire operation is denied.
+
+subscribers: []
+
+# Hot reload: Bus watches this file with inotify.
+# Add or remove subscribers without restarting.
+# Example subscribers are shipped as separate packages (see README).

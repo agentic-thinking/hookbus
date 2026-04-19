@@ -1,0 +1,12 @@
+{
+  "name": "hookbus-gate",
+  "version": "0.1.0",
+  "description": "Universal HookBus publisher. One binary, N agent protocol skins. Catches tool-call intent from any agent and publishes to HookBus for consolidated policy decisions.",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": { "hookbus-gate": "src/index.js" },
+  "scripts": {
+    "test": "node --test tests/"
+  },
+  "engines": { "node": ">=18" }
+}

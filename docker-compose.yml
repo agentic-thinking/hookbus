@@ -1,0 +1,59 @@
+# HookBus Light. The open-source runtime governance layer for autonomous AI agents.
+#
+# Starts HookBus on :18800 (bus + Light dashboard) with two MIT subscribers:
+#   CRE-AgentProtect (policy enforcement via Microsoft AGT, sync)
+#   AgentSpend       (token-cost monitor, async, dashboard on :8883)
+#
+# Quick start:
+#   docker compose up -d
+#   TOKEN=$(docker exec hookbus cat /root/.hookbus/.token)
+#   echo "Dashboard: http://localhost:18800/?token=$TOKEN"
+#
+# The bus generates a bearer token on first boot and writes it to the shared
+# named volume `hookbus-auth`. The subscribers mount the same volume read-only
+# and pick up the token automatically.
+
+services:
+  hookbus:
+    image: ghcr.io/agentic-thinking/hookbus:latest
+    container_name: hookbus
+    ports:
+      - "18800:18800"
+    environment:
+      # Pin the bearer token so it survives container restarts.
+      # Generate once: HOOKBUS_TOKEN=$(openssl rand -base64 32) docker compose up -d
+      # If unset, the bus regenerates a fresh token on every start and ALL
+      # consumers (publishers, dashboards, systemd drop-ins) will 401 until
+      # they are re-synced. Always pin this in production.
+      HOOKBUS_TOKEN: "${HOOKBUS_TOKEN:-}"
+    volumes:
+      - ./subscribers.yaml:/root/.hookbus/subscribers.yaml:ro
+      - hookbus-auth:/root/.hookbus
+    restart: unless-stopped
+
+  cre-agentprotect:
+    image: ghcr.io/agentic-thinking/cre-agentprotect:latest
+    container_name: cre-agentprotect
+    expose:
+      - "8878"
+    volumes:
+      - hookbus-auth:/root/.hookbus:ro
+    restart: unless-stopped
+    depends_on:
+      - hookbus
+
+  agentspend:
+    image: ghcr.io/agentic-thinking/hookbus-agentspend:latest
+    container_name: agentspend
+    ports:
+      - "8883:8879"
+    volumes:
+      - hookbus-auth:/root/.hookbus:ro
+      - agentspend-data:/root/.agentspend
+    restart: unless-stopped
+    depends_on:
+      - hookbus
+
+volumes:
+  hookbus-auth:
+  agentspend-data:

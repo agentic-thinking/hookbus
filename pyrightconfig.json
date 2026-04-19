@@ -1,0 +1,10 @@
+{
+  "include": ["hookbus"],
+  "exclude": ["**/__pycache__", "**/node_modules"],
+  "pythonVersion": "3.10",
+  "venvPath": ".",
+  "reportMissingImports": "warning",
+  "executionEnvironments": [
+    { "root": ".", "extraPaths": ["."] }
+  ]
+}

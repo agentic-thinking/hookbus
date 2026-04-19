@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hookbus"
+version = "0.1.0"
+description = "Universal event bus for AI agent lifecycle enforcement"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [{name = "CRE Contributors"}]
+keywords = ["ai", "agent", "governance", "hooks", "event-bus", "lifecycle"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+]
+dependencies = [
+    "pyyaml>=6.0",
+    "aiohttp>=3.9.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21"]
+
+[project.scripts]
+hookbus = "hookbus.bus:main"
+hookbus-client = "hookbus.client:main"
+
+[tool.setuptools.packages.find]
+where = ["."]

@@ -1,0 +1,7 @@
+{
+  "id": "cre",
+  "name": "HookBus Publisher",
+  "description": "Publishes OpenClaw before_tool_call events to HookBus and enforces consolidated decisions.",
+  "version": "0.2.0",
+  "configSchema": { "type": "object", "additionalProperties": false, "properties": {} }
+}

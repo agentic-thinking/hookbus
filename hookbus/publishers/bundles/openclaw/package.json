@@ -1,0 +1,6 @@
+{
+  "name": "hookbus-openclaw-publisher",
+  "version": "0.2.0",
+  "type": "module",
+  "main": "index.js"
+}

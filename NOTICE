@@ -1,0 +1,60 @@
+HookBus™
+Copyright 2026 Agentic Thinking Limited.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you
+may not use this software except in compliance with the License. A
+copy of the License is included in this distribution as the file
+named LICENSE, and may also be obtained at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+-------------------------------------------------------------------------------
+PATENTS
+-------------------------------------------------------------------------------
+
+This software is the subject of the following UK Patent Applications,
+filed by Agentic Thinking Limited:
+
+  GB2608069.7  — Governance-aware lifecycle event bus architecture
+                 with priority-weighted deny-wins consolidation,
+                 circuit breakers, and failover / merge groups.
+                 Filed 8 April 2026.
+
+Apache License 2.0 Section 3 grants Licensee a patent licence from
+Contributors covering the Licensed Work as distributed. That licence
+terminates on the date Licensee initiates patent litigation against
+any Contributor alleging that the Licensed Work or a contribution
+incorporated within the Licensed Work constitutes patent infringement.
+See Section 3 of LICENSE for full terms.
+
+-------------------------------------------------------------------------------
+TRADEMARKS
+-------------------------------------------------------------------------------
+
+HookBus™ and CRE™ are trademarks of Agentic Thinking Limited
+(UK Company 17152930).
+
+Nominative use — describing compatibility, integration, or reference —
+is permitted without prior permission. Commercial use of the HookBus™
+name in a product or service name requires written authorisation.
+Use of the HookBus™ name or logo in a manner that suggests endorsement,
+affiliation, or sponsorship by Agentic Thinking Limited without written
+authorisation is prohibited.
+
+-------------------------------------------------------------------------------
+THIRD-PARTY MARKS
+-------------------------------------------------------------------------------
+
+Microsoft and Agent Governance Toolkit (AGT) are trademarks of Microsoft
+Corporation. Anthropic and Claude Agent SDK are trademarks of Anthropic PBC.
+OpenAI and OpenAI Agents SDK are trademarks of OpenAI OpCo LLC. Amp and
+Sourcegraph are trademarks of Sourcegraph, Inc. Hermes and Nous Research
+are trademarks of Nous Research Inc. OpenClaw is a trademark of its
+respective owner. All third-party marks are used nominatively to identify
+projects this software integrates with. No affiliation with, endorsement
+by, or sponsorship from any third party is claimed or implied.
+
+-------------------------------------------------------------------------------
+
+Contact: contact@agenticthinking.uk
+Website: https://agenticthinking.uk

@@ -1,0 +1,7 @@
+{
+  "id": "hookbus-gate",
+  "name": "HookBus Universal Gate",
+  "description": "One binary, six agent handlers. Publishes normalised tool-call events to HookBus /event and enforces consolidated decisions. Replaces per-agent publisher bundles.",
+  "version": "0.1.0",
+  "handlers": ["claude-code-hook", "amp-delegate", "shell-wrapper", "openai-sdk", "openclaw-plugin", "auggie-shell"]
+}
