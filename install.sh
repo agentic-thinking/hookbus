@@ -143,20 +143,22 @@ if [[ -z "$RUNTIME" && "$NONINTERACTIVE" = "0" ]]; then
     cat <<MENU
 
 ${C_BOLD}Which agent runtime do you want to wire into HookBus?${C_RESET}
-  1) Hermes   (Nous Research, Python plugin)
-  2) OpenClaw (Node plugin)
-  3) Skip     (wire publishers manually later)
+  1) Claude Code (Anthropic, subprocess hook)
+  2) Hermes      (Nous Research, Python plugin)
+  3) OpenClaw    (Node plugin)
+  4) Skip        (wire publishers manually later)
 
 MENU
-    read -r -p "Choice [1-3]: " choice
+    read -r -p "Choice [1-4]: " choice
     case "$choice" in
-      1) RUNTIME="hermes" ;;
-      2) RUNTIME="openclaw" ;;
-      3|"") RUNTIME="skip" ;;
+      1) RUNTIME="claude-code" ;;
+      2) RUNTIME="hermes" ;;
+      3) RUNTIME="openclaw" ;;
+      4|"") RUNTIME="skip" ;;
       *) warn "Unknown choice '$choice', skipping publisher step"; RUNTIME="skip" ;;
     esac
   else
-    warn "No TTY for interactive prompt. Re-run with --runtime hermes|openclaw|skip. Skipping for now."
+    warn "No TTY for interactive prompt. Re-run with --runtime claude-code|hermes|openclaw|skip. Skipping for now."
     RUNTIME="skip"
   fi
 fi
@@ -181,7 +183,29 @@ install_hermes() {
   Next: pin these env vars before starting hermes-agent
     export HOOKBUS_URL=http://localhost:18800/event
     export HOOKBUS_TOKEN=$HOOKBUS_TOKEN
-    export HOOKBUS_SOURCE=hermes-agent
+  (HOOKBUS_SOURCE defaults to "hermes-agent" inside the publisher;
+   do NOT export HOOKBUS_SOURCE in your shell profile, it will leak
+   into other publishers on the same host.)
+HINT
+}
+
+install_claude_code() {
+  say "Installing Claude Code publisher..."
+  local TMP_DIR
+  TMP_DIR=$(mktemp -d)
+
+  git clone --quiet https://github.com/agentic-thinking/hookbus-publisher-claude-code.git "$TMP_DIR/src" || {
+    warn "clone failed"; rm -rf "$TMP_DIR"; return 1
+  }
+
+  (cd "$TMP_DIR/src" && HOOKBUS_URL="http://localhost:18800/event" HOOKBUS_TOKEN="$HOOKBUS_TOKEN" ./install.sh 2>&1 | tail -20) \
+    || warn "install.sh reported issues"
+  rm -rf "$TMP_DIR"
+
+  ok "Claude Code publisher installed."
+  cat <<HINT
+  Next: paste the hooks JSON block printed above into ~/.claude/settings.json
+  (or merge with your existing hooks) and restart Claude Code.
 HINT
 }
 
@@ -225,10 +249,11 @@ HINT
 }
 
 case "$RUNTIME" in
-  hermes)   install_hermes   || warn "Hermes publisher install had issues." ;;
-  openclaw) install_openclaw || warn "OpenClaw publisher install had issues." ;;
-  skip|"")  warn "Skipped publisher install. See $HOOKBUS_REPO for the full shim table." ;;
-  *)        warn "Unsupported runtime '$RUNTIME'. Accepted: hermes, openclaw, skip." ;;
+  claude-code) install_claude_code || warn "Claude Code publisher install had issues." ;;
+  hermes)      install_hermes      || warn "Hermes publisher install had issues." ;;
+  openclaw)    install_openclaw    || warn "OpenClaw publisher install had issues." ;;
+  skip|"")     warn "Skipped publisher install. See $HOOKBUS_REPO for the full shim table." ;;
+  *)           warn "Unsupported runtime '$RUNTIME'. Accepted: claude-code, hermes, openclaw, skip." ;;
 esac
 
 # ----------------------------------------------------------------------------
