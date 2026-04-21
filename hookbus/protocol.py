@@ -99,7 +99,7 @@ class HookEvent:
             timestamp=data["timestamp"],
             source=data["source"],
             session_id=data["session_id"],
-            tool_name=data["tool_name"],
+            tool_name=data.get("tool_name", ""),
             tool_input=data.get("tool_input", {}),
             metadata=data.get("metadata", {})
         )
