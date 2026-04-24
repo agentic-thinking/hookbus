@@ -17,7 +17,7 @@ import os
 import socket
 import importlib
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 from dataclasses import dataclass, field
 
 import yaml
@@ -64,6 +64,58 @@ def _load_or_generate_token() -> str:
             'Refusing to start without authentication.'
         )
     return tok
+
+
+# Per-publisher token map. Empty dict means legacy single-token mode
+# (every caller authenticates with the same token and is stamped with
+# HOOKBUS_LEGACY_PUBLISHER_ID as their agent_id). Populated mode requires
+# each caller to use a distinct token bound to a publisher name.
+#
+# Format: HOOKBUS_TOKENS="pub1:tok1,pub2:tok2,pub3:tok3"
+# Tokens must be unique; duplicates log a warning and the last mapping wins.
+def _load_publisher_tokens() -> Dict[str, str]:
+    """Parse HOOKBUS_TOKENS into a publisher_id -> token map.
+
+    Empty result means legacy single-token mode, which stays byte-compatible
+    with v0.x deployments. When populated, _auth_middleware resolves each
+    Bearer token to the matching publisher_id and stamps event.agent_id on
+    ingress so subscribers can key on a verified identity rather than on
+    the publisher-declared (and unvalidated) source field.
+    """
+    raw = os.environ.get('HOOKBUS_TOKENS', '').strip()
+    if not raw:
+        return {}
+    result: Dict[str, str] = {}
+    for entry in raw.split(','):
+        entry = entry.strip()
+        if not entry or ':' not in entry:
+            continue
+        pub, tok = entry.split(':', 1)
+        pub, tok = pub.strip(), tok.strip()
+        if not pub or not tok:
+            continue
+        if tok in result.values():
+            logger.warning('HOOKBUS_TOKENS: duplicate token for publisher %r, overwriting earlier mapping', pub)
+        result[pub] = tok
+    return result
+
+
+LEGACY_PUBLISHER_ID = os.environ.get('HOOKBUS_LEGACY_PUBLISHER_ID', 'legacy').strip() or 'legacy'
+"""agent_id stamped when the caller authenticates with the single-token
+fallback. Defaults to 'legacy'. CRE on 249 should set this to 'cre_legacy'
+via env so its events are distinguishable in AgentSpend counters until it
+migrates to per-publisher auth."""
+
+
+# Validation strictness feature flags. Publishers roll out the new wire
+# format (reasoning_content on PostLLMCall, correlation_id on Pre* events)
+# at their own pace. Until every publisher is migrated, bus runs validators
+# in warn-only mode so we can measure compliance without dropping traffic.
+#
+# Values: "off" (skip), "warn" (log, still route), "reject" (400 the event).
+# Flipped to "reject" only after Phase 2b rollout is complete.
+_REASONING_STRICTNESS = os.environ.get('HOOKBUS_STRICT_REASONING', 'off').strip().lower()
+_CORRELATION_STRICTNESS = os.environ.get('HOOKBUS_STRICT_CORRELATION', 'off').strip().lower()
 
 
 
@@ -129,27 +181,51 @@ async def _auth_middleware(request, handler):
     # Exempt: OPTIONS for CORS preflight (if any)
     if request.method == 'OPTIONS':
         return await handler(request)
-    token = getattr(request.app, 'hookbus_token', '')
-    if not token:
+    legacy_token = getattr(request.app, 'hookbus_token', '')
+    publisher_tokens: Dict[str, str] = getattr(request.app, 'hookbus_publisher_tokens', {})
+    if not legacy_token and not publisher_tokens:
         # Auth must be configured. Refuse to serve if startup did not set a token.
         return aiohttp.web.json_response(
             {'error': 'server misconfigured: auth token unavailable'},
             status=503,
         )
+
+    def _resolve_publisher(presented: str) -> Optional[str]:
+        """Return the publisher_id for a presented bearer token, or None
+        if it does not match. Checks per-publisher map first, falls back
+        to the legacy single-token map."""
+        for pub_id, tok in publisher_tokens.items():
+            if secrets.compare_digest(presented, tok):
+                return pub_id
+        if legacy_token and secrets.compare_digest(presented, legacy_token):
+            return LEGACY_PUBLISHER_ID
+        return None
+
     # Accept Authorization: Bearer <token>
     auth = request.headers.get('Authorization', '')
-    if auth.startswith('Bearer ') and secrets.compare_digest(auth[7:], token):
-        return await handler(request)
+    if auth.startswith('Bearer '):
+        pub_id = _resolve_publisher(auth[7:])
+        if pub_id is not None:
+            request['publisher_id'] = pub_id
+            return await handler(request)
     # Accept ?token=... for dashboard bookmark UX, then set a cookie
     q_tok = request.query.get('token', '')
-    if q_tok and secrets.compare_digest(q_tok, token):
-        resp = await handler(request)
-        resp.set_cookie('hookbus_token', token, httponly=True, samesite='Lax', path='/')
-        return resp
+    if q_tok:
+        pub_id = _resolve_publisher(q_tok)
+        if pub_id is not None:
+            request['publisher_id'] = pub_id
+            resp = await handler(request)
+            # Cookie carries the presented token so follow-up calls land on
+            # the same publisher mapping without re-passing the query param.
+            resp.set_cookie('hookbus_token', q_tok, httponly=True, samesite='Lax', path='/')
+            return resp
     # Accept session cookie (set after query-param entry)
     c_tok = request.cookies.get('hookbus_token', '')
-    if c_tok and secrets.compare_digest(c_tok, token):
-        return await handler(request)
+    if c_tok:
+        pub_id = _resolve_publisher(c_tok)
+        if pub_id is not None:
+            request['publisher_id'] = pub_id
+            return await handler(request)
     return aiohttp.web.json_response({'error': 'unauthorised', 'hint': 'supply Authorization: Bearer <token> header or ?token= query'}, status=401)
 
 from .protocol import (
@@ -157,7 +233,9 @@ from .protocol import (
     SubscriberResponse,
     Decision,
     DateTimeEncoder,
-    consolidate_decisions
+    consolidate_decisions,
+    validate_reasoning_content,
+    validate_correlation_id,
 )
 
 
@@ -409,22 +487,47 @@ class Bus:
         subscriber: SubscriberConfig,
         event: HookEvent
     ) -> Optional[SubscriberResponse]:
-        """Send event via HTTP."""
+        """Send event via HTTP. Uses a single shared aiohttp.ClientSession
+        for the lifetime of the bus instance so every subscriber fan-out
+        reuses keep-alive connections instead of tearing down TCP per call.
+        The Kimi-vs-Opus bus-latency test on 249 (24 Apr 2026) showed the
+        bus was the bottleneck, not the model; per-event session churn was
+        a material contributor."""
         _validate_subscriber_address(subscriber.address)
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                subscriber.address,
-                json=event.to_dict(),
-                headers=self._forward_headers(),
-                timeout=aiohttp.ClientTimeout(total=subscriber.timeout)
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return SubscriberResponse.from_dict(data)
-                elif response.status == 204:
-                    return None  # Async subscriber
-                else:
-                    raise Exception(f"HTTP error: {response.status}")
+        session = await self._get_http_session()
+        async with session.post(
+            subscriber.address,
+            json=event.to_dict(),
+            headers=self._forward_headers(),
+            timeout=aiohttp.ClientTimeout(total=subscriber.timeout)
+        ) as response:
+            if response.status == 200:
+                data = await response.json()
+                return SubscriberResponse.from_dict(data)
+            elif response.status == 204:
+                return None  # Async subscriber
+            else:
+                raise Exception(f"HTTP error: {response.status}")
+
+    async def _get_http_session(self) -> aiohttp.ClientSession:
+        """Return the shared ClientSession, creating it lazily.
+
+        Must be called from inside an event loop (aiohttp refuses to build
+        a session at import time). Connector tuned for subscriber fan-out:
+        high per-host concurrency, modest total ceiling, short DNS cache
+        so topology changes propagate without restarting the bus.
+        """
+        sess = getattr(self, "_http_session", None)
+        if sess is None or sess.closed:
+            connector = aiohttp.TCPConnector(
+                limit=100,
+                limit_per_host=30,
+                keepalive_timeout=60,
+                ttl_dns_cache=30,
+            )
+            self._http_session = aiohttp.ClientSession(connector=connector)
+            sess = self._http_session
+        return sess
 
     async def _send_in_process(
         self,
@@ -480,8 +583,18 @@ class Bus:
             f"to {len(matching)} subscribers"
         )
         
-        sync_subscribers = [s for s in matching if s.type == "sync"]
-        async_subscribers = [s for s in matching if s.type == "async"]
+        # Post* events never block the publisher. Gating semantics only
+        # apply to Pre* events; anything after the tool ran is observer
+        # traffic (audit, cost, KB update) that MUST NOT sit in the hot
+        # path. Kimi-vs-Opus test (24 Apr 2026) found Post-event blocking
+        # dominated task wall-time when heavy subscribers (DLP, auditor)
+        # processed large payloads synchronously.
+        if event.event_type.startswith("Post"):
+            sync_subscribers: list[SubscriberConfig] = []
+            async_subscribers = list(matching)
+        else:
+            sync_subscribers = [s for s in matching if s.type == "sync"]
+            async_subscribers = [s for s in matching if s.type == "async"]
         
         responses: list[SubscriberResponse] = []
         
@@ -525,19 +638,48 @@ class Bus:
         self,
         request: aiohttp.web.Request
     ) -> aiohttp.web.Response:
-        """Handle incoming HTTP request."""
+        """Handle incoming HTTP request. Stamp agent_id from the authenticated
+        publisher (overwriting anything the caller supplied), then run the
+        wire-format validators. Validator strictness is env-controlled so
+        publishers can migrate at their own pace."""
         try:
             data = await request.json()
             event = HookEvent.from_dict(data)
-            
+
+            # Bus stamps agent_id authoritatively. Whatever the publisher put
+            # there is ignored; identity comes from the token, not the payload.
+            publisher_id = request.get('publisher_id', '') or LEGACY_PUBLISHER_ID
+            event.agent_id = publisher_id
+
+            # Feature-flagged wire-format validators. "off" skips entirely,
+            # "warn" logs but still routes, "reject" returns 400. Publishers
+            # roll out the new contract on their own cadence; bus tightens
+            # from "off" -> "warn" -> "reject" as rollout completes.
+            for check, flag in (
+                (validate_reasoning_content, _REASONING_STRICTNESS),
+                (validate_correlation_id, _CORRELATION_STRICTNESS),
+            ):
+                if flag == 'off':
+                    continue
+                err = check(event)
+                if err is None:
+                    continue
+                if flag == 'warn':
+                    logger.warning('[validator] %s agent=%s event=%s', err, event.agent_id, event.event_id)
+                elif flag == 'reject':
+                    return aiohttp.web.json_response(
+                        {"error": "wire format violation", "detail": err, "event_id": event.event_id},
+                        status=400,
+                    )
+
             decision, reason = await self.route_event(event)
-            
+
             return aiohttp.web.json_response({
                 "event_id": event.event_id,
                 "decision": decision.value,
                 "reason": reason
             })
-            
+
         except Exception as e:
             logger.exception("Request handling error")
             return aiohttp.web.json_response(
@@ -563,8 +705,24 @@ class Bus:
         logger.info('  Publishers use:  Authorization: Bearer <token>')
         logger.info('  Pin in production: set HOOKBUS_TOKEN env before first boot.')
         logger.info('=' * 60)
+        publisher_tokens = _load_publisher_tokens()
         app = aiohttp.web.Application(middlewares=[_auth_middleware])
         app.hookbus_token = token
+        app.hookbus_publisher_tokens = publisher_tokens
+        if publisher_tokens:
+            logger.info(
+                '  Per-publisher auth active for %d publishers: %s',
+                len(publisher_tokens), sorted(publisher_tokens.keys()),
+            )
+        else:
+            logger.info(
+                '  Per-publisher auth not configured (legacy single-token mode). '
+                'Set HOOKBUS_TOKENS="pub1:tok1,pub2:tok2" for per-publisher isolation.'
+            )
+        logger.info(
+            '  Reasoning validator: %s | Correlation validator: %s',
+            _REASONING_STRICTNESS, _CORRELATION_STRICTNESS,
+        )
         app.router.add_post("/event", self.handle_http_request)
         # Register HookBus Light dashboard routes (GET /, /api/stats, /api/events,
         # /api/subscribers, /api/publishers) on the same aiohttp app.
@@ -590,8 +748,12 @@ class Bus:
         logger.info("Hot reload: send SIGHUP to reload subscribers.yaml")
 
     async def stop_server(self) -> None:
-        """Stop the HTTP server."""
+        """Stop the HTTP server and release the shared HTTP session."""
         self._running = False
+        sess = getattr(self, "_http_session", None)
+        if sess is not None and not sess.closed:
+            await sess.close()
+            self._http_session = None
         logger.info("Bus server stopped")
 
     async def reload_config(self) -> None:
@@ -659,7 +821,8 @@ def _run_server() -> None:
     """Boot the HTTP bus and block forever."""
     import os
     port = int(os.environ.get("HOOKBUS_PORT", "18800"))
-    bus = Bus()
+    config_path = os.environ.get("HOOKBUS_CONFIG", "").strip() or None
+    bus = Bus(config_path=config_path)
 
     async def _boot():
         await bus.start_server(host="0.0.0.0", port=port)

@@ -104,6 +104,9 @@ class DashboardState:
                     "last_seen": ts,
                     "last_decision": decision_str,
                 })
+        _meta = getattr(event, "metadata", {}) or {}
+        _reasoning = _meta.get("reasoning_content") if isinstance(_meta, dict) else None
+        _reasoning_chars = _meta.get("reasoning_chars", len(_reasoning or "")) if isinstance(_meta, dict) else 0
         self._events.appendleft({
             "id": self._next_id,
             "ts": ts,
@@ -113,6 +116,9 @@ class DashboardState:
             "decision": decision_str,
             "reason": (reason or "")[:240],
             "latency_ms": round(latency_ms, 1),
+            "metadata": _meta if isinstance(_meta, dict) else {},
+            "reasoning_chars": int(_reasoning_chars or 0),
+            "has_reasoning": bool(_reasoning),
         })
         self._next_id += 1
 

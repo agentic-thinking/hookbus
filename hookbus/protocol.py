@@ -25,6 +25,8 @@ class EventType(str, Enum):
     MODEL_RESPONSE = "ModelResponse"
     AGENT_HANDOFF = "AgentHandoff"
     ERROR_OCCURRED = "ErrorOccurred"
+    PRE_LLM_CALL = "PreLLMCall"
+    POST_LLM_CALL = "PostLLMCall"
 
 
 class Decision(str, Enum):
@@ -47,24 +49,35 @@ class Transport(str, Enum):
     IN_PROCESS = "in_process"
 
 
+SCHEMA_VERSION = 1
+"""Current HookEvent schema version. Consumers that see a higher value
+should log a warning and continue processing on a best-effort basis,
+never reject. Incremented only when the wire format changes in a way
+that older consumers could misinterpret. Owned by the bus repo."""
+
+
 @dataclass
 class HookEvent:
     """
     A lifecycle event from an AI agent or SDK.
-    
+
     This is the core message format that flows through the bus.
     All fields are required unless marked optional.
-    
+
     Example JSON:
     {
+        "schema_version": 1,
         "event_id": "550e8400-e29b-41d4-a716-446655440000",
         "event_type": "PreToolUse",
         "timestamp": "2026-04-08T04:30:00.000Z",
         "source": "claude-code",
         "session_id": "abc123",
+        "agent_id": "claude-code-alpha",
+        "correlation_id": "7b2e...",
         "tool_name": "Bash",
         "tool_input": {"command": "git push --force origin main"},
-        "metadata": {}
+        "metadata": {},
+        "annotations": {"subscribers": {}}
     }
     """
     event_id: str
@@ -75,6 +88,10 @@ class HookEvent:
     tool_name: str
     tool_input: dict = field(default_factory=dict)
     metadata: dict = field(default_factory=dict)
+    schema_version: int = SCHEMA_VERSION
+    agent_id: str = ""
+    correlation_id: str = ""
+    annotations: dict = field(default_factory=dict)
 
     def to_json(self) -> str:
         """Serialize event to JSON string matching spec format."""
@@ -92,7 +109,9 @@ class HookEvent:
 
     @classmethod
     def from_dict(cls, data: dict) -> "HookEvent":
-        """Create event from dictionary."""
+        """Create event from dictionary. Unknown schema_version values are
+        accepted so consumers built against an older protocol still process
+        newer events on best-effort terms; never reject on version alone."""
         return cls(
             event_id=data["event_id"],
             event_type=data["event_type"],
@@ -101,7 +120,11 @@ class HookEvent:
             session_id=data["session_id"],
             tool_name=data.get("tool_name", ""),
             tool_input=data.get("tool_input", {}),
-            metadata=data.get("metadata", {})
+            metadata=data.get("metadata", {}),
+            schema_version=data.get("schema_version", 1),
+            agent_id=data.get("agent_id", ""),
+            correlation_id=data.get("correlation_id", ""),
+            annotations=data.get("annotations", {}),
         )
 
     @classmethod
@@ -112,9 +135,20 @@ class HookEvent:
         session_id: str,
         tool_name: str,
         tool_input: Optional[dict] = None,
-        metadata: Optional[dict] = None
+        metadata: Optional[dict] = None,
+        agent_id: str = "",
+        correlation_id: Optional[str] = None,
+        annotations: Optional[dict] = None,
     ) -> "HookEvent":
-        """Factory method to create a new event with auto-generated ID and timestamp."""
+        """Factory method to create a new event with auto-generated ID and timestamp.
+
+        correlation_id: if None (default), generate a fresh UUID for Pre* events
+        so they can be matched with their Post* counterparts later. Callers that
+        want to echo a received correlation_id on a Post* event must pass it
+        explicitly. Empty string is a valid explicit opt-out.
+        """
+        if correlation_id is None:
+            correlation_id = str(uuid.uuid4()) if event_type.startswith("Pre") else ""
         return cls(
             event_id=str(uuid.uuid4()),
             event_type=event_type,
@@ -123,8 +157,35 @@ class HookEvent:
             session_id=session_id,
             tool_name=tool_name,
             tool_input=tool_input or {},
-            metadata=metadata or {}
+            metadata=metadata or {},
+            agent_id=agent_id,
+            correlation_id=correlation_id,
+            annotations=annotations or {},
         )
+
+    def set_annotation(self, subscriber: str, key: str, value: Any) -> None:
+        """Write an annotation under the subscriber's namespace.
+
+        Convention: annotations["subscribers"][<subscriber_name>][<key>] = value
+        Separates AgentSpend cost writes from CRE risk writes from auditor
+        evidence writes. Subscribers never share top-level keys.
+        """
+        subs = self.annotations.setdefault("subscribers", {})
+        subs.setdefault(subscriber, {})[key] = value
+
+    def get_annotation(self, subscriber: str, key: str, default: Any = None) -> Any:
+        """Read an annotation from the subscriber's namespace."""
+        return (
+            self.annotations.get("subscribers", {})
+            .get(subscriber, {})
+            .get(key, default)
+        )
+
+    def get_reasoning_content(self) -> Optional[str]:
+        """Read the canonical reasoning text off a PostLLMCall event, or None
+        if absent. Publishers populate metadata[META_REASONING_CONTENT] via
+        hookbus.publisher_helpers.extract_reasoning."""
+        return self.metadata.get(META_REASONING_CONTENT)
 
 
 @dataclass
@@ -238,3 +299,50 @@ def consolidate_decisions(responses: list[SubscriberResponse]) -> tuple[Decision
     if has_ask:
         return Decision.ASK, combined_reason
     return Decision.ALLOW, combined_reason
+
+# ---------------------------------------------------------------------------
+# Well-known metadata keys for LLM-call events
+# ---------------------------------------------------------------------------
+# Publishers SHOULD populate these on PostLLMCall events (tool_name="llm.api_request")
+# to preserve the model's reasoning chain in the audit log. Required for
+# high-risk AI systems under EU AI Act Art. 12 (traceability of decisions).
+META_REASONING_CONTENT = "reasoning_content"   # full reasoning text
+META_REASONING_CHARS = "reasoning_chars"       # length, for quick filtering
+
+
+# ---------------------------------------------------------------------------
+# Bus-ingress validators
+# ---------------------------------------------------------------------------
+# Pure functions. Return None if the event is valid, otherwise a short human
+# reason describing the problem. Bus decides whether to reject or warn based
+# on runtime feature flags (HOOKBUS_STRICT_REASONING, etc.) so the protocol
+# itself stays neutral on enforcement posture.
+
+def validate_reasoning_content(event: "HookEvent") -> Optional[str]:
+    """PostLLMCall events must carry metadata[META_REASONING_CONTENT]. The
+    value may be None (model produced no reasoning) or a string (reasoning
+    text). Omission of the key is a contract violation; explicit null is
+    fine. All other event types are unaffected."""
+    if event.event_type != EventType.POST_LLM_CALL.value:
+        return None
+    if META_REASONING_CONTENT not in event.metadata:
+        return (
+            f"PostLLMCall missing required metadata key "
+            f"{META_REASONING_CONTENT!r} (null is accepted, omission is not)"
+        )
+    return None
+
+
+def validate_correlation_id(event: "HookEvent") -> Optional[str]:
+    """Pre* events must supply a non-empty correlation_id so AgentSpend and
+    auditor subscribers can join them to their matching Post* events.
+    Post* events may echo one or omit it depending on whether the emitting
+    publisher has a reference to the originating Pre. Bus does not enforce
+    Post-side echoing in v1.0; that tightens in v1.1 once every publisher
+    propagates the field."""
+    if event.event_type.startswith("Pre") and not event.correlation_id:
+        return (
+            f"{event.event_type} missing correlation_id; Pre* events must "
+            f"generate one so PostLLMCall reconciliation works"
+        )
+    return None
