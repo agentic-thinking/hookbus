@@ -19,12 +19,12 @@ Subscribers in a given tier compose: a bus can host many hard gates + many skill
 
 - ✅ **CRE-AgentProtect**: Microsoft AGT L1 policy engine. Shipped.
 - ✅ **AgentSpend**: token/cost tracking (observational, not gate). Shipped.
-- 🟡 **DLP Filter**: regex-based secret/PII redaction at envelope boundary. Enterprise tier, running on 249.
-- 🟡 **Auditor**: hash-chained immutable event log for SOC 2 / EU AI Act Art. 12. Enterprise tier, running on 249.
-- 🟡 **KB Injector**: context injection on UserPromptSubmit based on keyword match. Enterprise tier, running on 249.
-- 🟡 **Session Memory**: cross-turn agent memory correlated by session_id. Enterprise tier, running on 249.
+- 🟡 **DLP Filter**: regex-based secret/PII redaction at envelope boundary. Enterprise tier, running in a development deployment.
+- 🟡 **Auditor**: hash-chained immutable event log for SOC 2 / EU AI Act Art. 12. Enterprise tier, running in a development deployment.
+- 🟡 **KB Injector**: context injection on UserPromptSubmit based on keyword match. Enterprise tier, running in a development deployment.
+- 🟡 **Session Memory**: cross-turn agent memory correlated by session_id. Enterprise tier, running in a development deployment.
 
-All Enterprise-tier items stay on 249 until the bus-side consolidation and licensing story is ready for Light.
+All Enterprise-tier items stay until the bus-side consolidation and licensing story is ready for Light.
 
 ---
 
@@ -145,7 +145,7 @@ Each is a small subscriber wrapping the generic webhook shape with platform-spec
 
 ## Immediate priority order (as of 2026-04-21)
 
-1. Finish the Light-tier v0.1 push (claude-code / hermes / openclaw / amp v2.1 + cre-agentprotect double-prefix fix + bus install.sh update). Not in this backlog: see release coordination.
+1. Finish the Light-tier v0.1 push (claude-code / hermes / openclaw / amp v2.1 + per-subscriber namespacing fix (avoids downstream prefix collisions) + bus install.sh update). Not in this backlog: see release coordination.
 2. Skill-injection subscriber (Tier 2): small, high-leverage, validates the skills-as-policy pattern.
 3. Generic `hookbus-publisher-webhook` (Tier 4a): unlocks the whole integration story.
 4. Notion subscriber (Tier 4b): first branded integration, enterprise distribution lever.

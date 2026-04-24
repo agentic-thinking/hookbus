@@ -115,7 +115,7 @@ Optimised for sub-10ms P99 in local deployments.
 
 ---
 
-## Six canonical event types
+## Canonical event types
 
 | Event | When it fires | Typical subscribers |
 |---|---|---|
@@ -123,8 +123,14 @@ Optimised for sub-10ms P99 in local deployments.
 | `PreToolUse` | Agent about to call a tool | Policy engines, DLP filter |
 | `PostToolUse` | Tool call returned | Audit log, cost tracker |
 | `PreLLMCall` | LLM call about to happen | Prompt shield, budget check |
-| `PostLLMCall` | LLM returned | Cost tracker (tokens, model, provider) |
-| `Stop` | Agent run terminating | Session snapshot, cleanup |
+| `PostLLMCall` | LLM returned | Cost tracker (tokens, model, provider, reasoning) |
+| `ModelResponse` | LLM finished generation | Transcript capture, provenance |
+| `SessionStart` | New session began | Session memory, auditor |
+| `SessionEnd` | Session ended | Session snapshot, cleanup |
+| `AgentHandoff` | Agent delegating to another agent | Trace correlation, observability |
+| `ErrorOccurred` | Something failed | Incident reporting, error tracker |
+
+The bus never validates event types, it accepts any string, so new event types route automatically without bus code changes. (Earlier previews referenced a `Stop` event; use `SessionEnd` instead. Publishers that still send `Stop` will route fine, subscribers should treat it as equivalent to `SessionEnd`.)
 
 Full envelope contract: see [`HOOKBUS_SPEC.md`](./HOOKBUS_SPEC.md).
 
@@ -192,6 +198,15 @@ subscribers:
 ```
 
 See [`hookbus.yaml`](./hookbus.yaml) for the complete configuration reference.
+
+By default the bus reads `~/.hookbus/subscribers.yaml`. Override with `HOOKBUS_CONFIG`:
+
+```bash
+export HOOKBUS_CONFIG=/etc/hookbus/subscribers.yaml
+docker compose up -d
+```
+
+Useful for immutable deployments where the config lives alongside the service manifest.
 
 ---
 
@@ -295,6 +310,20 @@ services:
 ```
 
 Then `HOOKBUS_TOKEN=$(openssl rand -base64 32) docker compose up -d`.
+
+### Per-publisher tokens (multi-tenant)
+
+For deployments with multiple agents (or multiple teams sharing one bus), issue one token per publisher with `HOOKBUS_TOKENS`. The bus resolves the bearer back to a `publisher_id` and stamps it onto `event.agent_id` so downstream subscribers can attribute every event to a known caller.
+
+```yaml
+services:
+  hookbus:
+    environment:
+      # publisher_id:token pairs, comma-separated
+      HOOKBUS_TOKENS: "hermes-prod:tok_AAA...,claude-code:tok_BBB...,openclaw:tok_CCC..."
+```
+
+`HOOKBUS_TOKEN` (single) and `HOOKBUS_TOKENS` (multi) can be combined, the single token falls through as the legacy publisher.
 
 ### Network binding
 

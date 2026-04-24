@@ -104,16 +104,37 @@ Each sync subscriber has a priority (default 100). If two subscribers disagree, 
 
 ```json
 {
+  "schema_version": 1,
   "event_id": "550e8400-e29b-41d4-a716-446655440000",
   "event_type": "PreToolUse",
   "timestamp": "2026-04-08T04:30:00.000Z",
   "source": "claude-code",
+  "agent_id": "hermes-prod",
   "session_id": "abc123",
+  "correlation_id": "run-7f3b...",
   "tool_name": "Bash",
   "tool_input": {"command": "git push --force origin main"},
-  "metadata": {}
+  "metadata": {},
+  "annotations": {}
 }
 ```
+
+| Field | Required | Purpose |
+|---|---|---|
+| `schema_version` | no (defaults to `1`) | Wire-format version (integer), bumped only on breaking envelope changes |
+| `event_id` | yes | UUID, unique per event |
+| `event_type` | yes | Canonical name (see below) |
+| `timestamp` | yes | ISO-8601 UTC |
+| `source` | yes | Publisher family, e.g. `claude-code`, `openai-sdk`, `hermes` |
+| `agent_id` | no | Specific publisher instance. Bus always stamps this from the resolved publisher_id. Under `HOOKBUS_TOKENS` the value is the configured publisher name; under single-token `HOOKBUS_TOKEN` it defaults to `legacy` (override with `HOOKBUS_LEGACY_PUBLISHER_ID`). See Publisher Integration. |
+| `session_id` | no | Groups events in one agent run |
+| `correlation_id` | no | Links related events across sessions (multi-agent handoff, retries) |
+| `tool_name` | for `PreToolUse` / `PostToolUse` | Tool being called |
+| `tool_input` | no | Arbitrary JSON, bus does not validate |
+| `metadata` | no | Hook-specific structured data (see Standard Metadata Keys) |
+| `annotations` | no | Free-form subscriber/operator notes, bus never reads |
+
+Convention: subscribers that write annotations scope their keys under a `subscribers.<name>` prefix (e.g. `annotations.subscribers.dlp-filter`) so unrelated subscribers do not stomp on each other. `hookbus.protocol` exposes `set_annotation` / `get_annotation` helpers that apply this prefix for you.
 
 All events use this format regardless of which publisher sent them. The thin client normalises before sending.
 
@@ -128,9 +149,11 @@ All events use this format regardless of which publisher sent them. The thin cli
 | PreToolUse | Before | Tool call is about to execute |
 | PostToolUse | After | Tool call completed |
 | UserPromptSubmit | Before | User sent a message |
+| PreLLMCall | Before | LLM API call about to be issued (budget check, prompt shield) |
+| PostLLMCall | After | LLM API call returned (cost tracker, transcript capture) |
+| ModelResponse | After | LLM finished generation (transcript, provenance) |
 | SessionStart | State | New session began |
 | SessionEnd | State | Session ended |
-| ModelResponse | After | LLM returned a response |
 | AgentHandoff | During | Agent delegating to another agent |
 | ErrorOccurred | After | Something failed |
 
@@ -153,6 +176,37 @@ All events use this format regardless of which publisher sent them. The thin cli
 | CrewAI | step_callback | PreToolUse |
 
 Normalisation happens in the thin client, never in the bus.
+
+---
+
+## Standard Metadata Keys
+
+`metadata` is free-form, but the following keys are canonical across subscribers. Shims SHOULD emit them when the data is available, subscribers MAY rely on them.
+
+### `PostLLMCall`
+
+| Key | Type | Purpose |
+|---|---|---|
+| `model` | string | Model id as returned by the provider (e.g. `MiniMax-M2.7`, `claude-opus-4-7`, `moonshotai/kimi-k2.6-20260420`) |
+| `provider` | string | `anthropic`, `openai`, `minimax`, `openrouter`, `bedrock`, `azure`, `vertex`, etc. |
+| `tokens_input` | int | Input tokens counted by the provider |
+| `tokens_output` | int | Output tokens counted by the provider |
+| `total_tokens` | int | Convenience sum |
+| `reasoning_content` | string or null | Full reasoning text when the provider exposed it (Anthropic thinking blocks, OpenAI-compat `reasoning_content`, MiniMax `reasoning_details`). Truncated to 64k chars by `hookbus.publisher_helpers.truncate_reasoning` |
+| `reasoning_chars` | int | Length of the original reasoning before any truncation. Useful for filtering/indexing without loading the full payload |
+| `response_content` | string | Reply text delivered to the caller (truncated to ~4k chars in typical subscribers) |
+
+`reasoning_content` + `response_content` together give regulators a complete transcript of the LLM exchange, which is what EU AI Act Art 12 record-keeping for high-risk AI systems requires.
+
+### `PreToolUse` / `PostToolUse`
+
+| Key | Type | Purpose |
+|---|---|---|
+| `estimated_usd` | float | Cost estimate from a budget subscriber, stamped onto the event so downstream consumers see a single authoritative figure |
+| `duration_ms` | int | Tool wall-clock (for `PostToolUse`) |
+| `exit_code` | int | Tool exit code (for `PostToolUse`) |
+
+Subscribers can add arbitrary keys, but picking a name that collides with the canonical list will confuse other subscribers that trust the canonical meaning.
 
 ---
 
@@ -222,6 +276,14 @@ subscribers:
 | http | Remote or third-party subscribers | Slack, Datadog, PagerDuty |
 | in_process | Simple Python class loaded by bus | Audit logger, token counter |
 
+### Config Path
+
+The bus reads subscribers from `~/.hookbus/subscribers.yaml` by default. Set `HOOKBUS_CONFIG` to point at a different path, useful for immutable deployments where the config ships alongside the service manifest:
+
+```bash
+export HOOKBUS_CONFIG=/etc/hookbus/subscribers.yaml
+```
+
 ### Hot Reload
 
 Bus watches subscribers.yaml with inotify. Add or remove subscribers without restarting. Zero downtime.
@@ -271,6 +333,55 @@ Deny wins. Always. If one sync subscriber says deny and ten say allow, the answe
 ---
 
 ## Publisher Integration
+
+### Authentication
+
+The bus accepts a bearer token on every envelope. Publishers send `Authorization: Bearer <token>` on their POST to `/event`. Two modes:
+
+| Env var | Use case | Semantics |
+|---|---|---|
+| `HOOKBUS_TOKEN` | Single publisher | One shared token. Any envelope with that token is accepted. `event.agent_id` is untouched. |
+| `HOOKBUS_TOKENS` | Multi-tenant | Comma-separated `publisher_id:token` pairs. The bus resolves the presented bearer back to a `publisher_id` and stamps it onto `event.agent_id`. Subscribers can attribute every event to a known caller without trusting publisher-supplied `agent_id`. |
+
+```yaml
+# docker-compose.yml — multi-tenant bus
+services:
+  hookbus:
+    environment:
+      HOOKBUS_TOKENS: "hermes-prod:tok_AAA...,claude-code:tok_BBB...,openclaw:tok_CCC..."
+```
+
+Both can be set at once. The bus resolves multi-tenant first (`HOOKBUS_TOKENS`), then falls through to the single-token check (`HOOKBUS_TOKEN`) on miss. Supported together primarily for migration scenarios - bring up the bus with single-token, then swap publishers to per-publisher tokens one at a time. Steady-state production should pick one mode.
+
+### Environment reference (bus)
+
+The bus reads these env vars at startup. Keep in sync with `docker-compose.yml` / your process manager.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `HOOKBUS_TOKEN` | generated | Single shared bearer token. Legacy mode. |
+| `HOOKBUS_TOKENS` | unset | `publisher_id:token,...` map. Multi-tenant auth + `agent_id` stamping. |
+| `HOOKBUS_LEGACY_PUBLISHER_ID` | `legacy` | `agent_id` value stamped for legacy-token callers. |
+| `HOOKBUS_TOKEN_PATH` | `/root/.hookbus/.token` | Where the bus persists the generated token. |
+| `HOOKBUS_CONFIG` | `~/.hookbus/subscribers.yaml` | Path to the subscriber configuration YAML. |
+| `HOOKBUS_STRICT_REASONING` | `off` | `off` \| `warn` \| `reject`. Validator for `reasoning_content` on `PostLLMCall`. Invalid values abort startup. |
+| `HOOKBUS_STRICT_CORRELATION` | `off` | `off` \| `warn` \| `reject`. Validator for `correlation_id` on `Pre*` events. |
+| `HOOKBUS_SUBSCRIBER_ALLOW_PRIVATE` | `0` | Set to `1` to permit subscriber URLs resolving to private/loopback IPs (Compose/K8s deployments). Cloud metadata endpoints remain blocked unconditionally. |
+
+Rollout pattern: new validators start at `off` so existing publishers don\'t break; flip to `warn` during migration, then `reject` once every publisher ships the new wire format.
+
+### Publisher helpers (Python)
+
+Shim authors can reuse the common plumbing rather than reimplement it per-vendor:
+
+```python
+from hookbus.publisher_helpers import extract_reasoning, truncate_reasoning
+
+reasoning, reasoning_chars, reply = extract_reasoning(response, provider="minimax")
+# -> ("...CoT text...", 1843, "final reply to user")
+```
+
+`extract_reasoning` handles every LLM response shape we currently see on the bus: Anthropic thinking blocks; OpenAI-compat `reasoning_content` / `reasoning` / `reasoning_details` (covers Kimi, MiniMax, Z.AI GLM, OpenRouter, Gemini, Hermes, Amp, claude-code); and the OpenAI Agents SDK `ModelResponse` shape. Returns `(reasoning_content, reasoning_chars, reply_text)`. Does not intentionally raise for missing fields - a shape we haven\'t seen returns `(None, 0, "")` rather than erroring.
 
 ### AI Assistants (auto-wire)
 
