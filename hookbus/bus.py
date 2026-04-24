@@ -94,17 +94,23 @@ def _load_publisher_tokens() -> Dict[str, str]:
         pub, tok = pub.strip(), tok.strip()
         if not pub or not tok:
             continue
-        if tok in result.values():
-            logger.warning('HOOKBUS_TOKENS: duplicate token for publisher %r, overwriting earlier mapping', pub)
+        existing = next((p for p, t in result.items() if t == tok), None)
+        if existing is not None:
+            logger.warning(
+                'HOOKBUS_TOKENS: duplicate token - publisher %r displaces %r '
+                '(last mapping wins). Use distinct tokens per publisher.',
+                pub, existing,
+            )
         result[pub] = tok
     return result
 
 
 LEGACY_PUBLISHER_ID = os.environ.get('HOOKBUS_LEGACY_PUBLISHER_ID', 'legacy').strip() or 'legacy'
 """agent_id stamped when the caller authenticates with the single-token
-fallback. Defaults to 'legacy'. CRE on 249 should set this to 'cre_legacy'
-via env so its events are distinguishable in AgentSpend counters until it
-migrates to per-publisher auth."""
+fallback (HOOKBUS_TOKEN, no HOOKBUS_TOKENS). Defaults to 'legacy'. Operators
+mixing single-token and multi-tenant modes should override this env var so
+legacy traffic is distinguishable from per-publisher traffic in downstream
+counters."""
 
 
 # Validation strictness feature flags. Publishers roll out the new wire
@@ -116,6 +122,41 @@ migrates to per-publisher auth."""
 # Flipped to "reject" only after Phase 2b rollout is complete.
 _REASONING_STRICTNESS = os.environ.get('HOOKBUS_STRICT_REASONING', 'off').strip().lower()
 _CORRELATION_STRICTNESS = os.environ.get('HOOKBUS_STRICT_CORRELATION', 'off').strip().lower()
+
+_VALID_STRICTNESS = frozenset({'off', 'warn', 'reject'})
+for _name, _val in (
+    ('HOOKBUS_STRICT_REASONING', _REASONING_STRICTNESS),
+    ('HOOKBUS_STRICT_CORRELATION', _CORRELATION_STRICTNESS),
+):
+    if _val not in _VALID_STRICTNESS:
+        raise SystemExit(
+            f'FATAL: {_name}={_val!r} is not a valid strictness level. '
+            f'Accepted: {sorted(_VALID_STRICTNESS)}'
+        )
+
+
+# Observer events never block the publisher: they describe something that
+# already happened (tool returned, LLM replied, session ended, error raised).
+# Gating them would add latency on every call for no decision value. Sync
+# subscribers configured for these events still receive them, just as
+# async fire-and-forget; if a subscriber genuinely needs to block on a
+# post-fact event, the right fix is to model it as a Pre* hook earlier in
+# the lifecycle, not to block the hot path. Explicit frozenset (rather
+# than prefix-match) so adding a new event type is a deliberate act.
+_OBSERVER_EVENT_TYPES = frozenset({
+    'PostToolUse',
+    'PostLLMCall',
+    'ModelResponse',
+    'SessionEnd',
+    'ErrorOccurred',
+})
+
+# Warn once per (subscriber, event_type) when a sync subscriber is demoted
+# to async because its event type is observer-class. Silent demotion was a
+# v0.x behaviour that caught operators by surprise; the warning gives them
+# one chance to either move the gating logic to a Pre* event or accept the
+# async semantics.
+_observer_demoted_warned: set = set()
 
 
 
@@ -217,7 +258,23 @@ async def _auth_middleware(request, handler):
             resp = await handler(request)
             # Cookie carries the presented token so follow-up calls land on
             # the same publisher mapping without re-passing the query param.
-            resp.set_cookie('hookbus_token', q_tok, httponly=True, samesite='Lax', path='/')
+                # Cookie security:
+            #   - secure=True when the request arrived over HTTPS, or when the
+            #     operator forces it via HOOKBUS_COOKIE_SECURE=1 (e.g. behind a
+            #     reverse proxy that terminates TLS upstream).
+            #   - stays False on plain-HTTP local dev / Compose so the cookie
+            #     remains usable there. Production HTTPS callers get the cookie
+            #     gated to secure transport automatically.
+            cookie_secure = (
+                request.scheme == 'https'
+                or os.environ.get('HOOKBUS_COOKIE_SECURE', '').strip().lower()
+                   in {'1', 'true', 'yes'}
+            )
+            resp.set_cookie(
+                'hookbus_token', q_tok,
+                httponly=True, samesite='Lax', path='/',
+                secure=cookie_secure,
+            )
             return resp
     # Accept session cookie (set after query-param entry)
     c_tok = request.cookies.get('hookbus_token', '')
@@ -336,7 +393,14 @@ class Bus:
         self._in_process_handlers: dict[str, object] = {}
         self._running = False
         self._server: Optional[aiohttp.web.Application] = None
-        
+
+        # Shared HTTP session state. Created eagerly here (sync context, no
+        # races) and bound to an event loop only on first acquire. Guarded
+        # by a lock so lazy creation + stop_server close are mutually
+        # exclusive under concurrency.
+        self._http_session: Optional[aiohttp.ClientSession] = None
+        self._http_session_lock: asyncio.Lock = asyncio.Lock()
+
         self._load_config()
 
     def _forward_headers(self) -> dict:
@@ -490,9 +554,9 @@ class Bus:
         """Send event via HTTP. Uses a single shared aiohttp.ClientSession
         for the lifetime of the bus instance so every subscriber fan-out
         reuses keep-alive connections instead of tearing down TCP per call.
-        The Kimi-vs-Opus bus-latency test on 249 (24 Apr 2026) showed the
-        bus was the bottleneck, not the model; per-event session churn was
-        a material contributor."""
+        Internal latency profiling showed per-event session churn was the
+        dominant cost in busy deployments; a shared, keep-alive-enabled
+        session is measurably faster and kinder to downstream TCP stacks."""
         _validate_subscriber_address(subscriber.address)
         session = await self._get_http_session()
         async with session.post(
@@ -510,24 +574,33 @@ class Bus:
                 raise Exception(f"HTTP error: {response.status}")
 
     async def _get_http_session(self) -> aiohttp.ClientSession:
-        """Return the shared ClientSession, creating it lazily.
+        """Return the shared ClientSession, creating it lazily on first call.
 
         Must be called from inside an event loop (aiohttp refuses to build
         a session at import time). Connector tuned for subscriber fan-out:
         high per-host concurrency, modest total ceiling, short DNS cache
         so topology changes propagate without restarting the bus.
+
+        Concurrency: the lock is created in __init__ so it is never racy
+        to observe. Double-checked under the lock in case a concurrent
+        caller already constructed the session.
         """
-        sess = getattr(self, "_http_session", None)
-        if sess is None or sess.closed:
+        sess = self._http_session
+        if sess is not None and not sess.closed:
+            return sess
+        async with self._http_session_lock:
+            sess = self._http_session
+            if sess is not None and not sess.closed:
+                return sess
             connector = aiohttp.TCPConnector(
                 limit=100,
                 limit_per_host=30,
                 keepalive_timeout=60,
                 ttl_dns_cache=30,
+                enable_cleanup_closed=True,
             )
             self._http_session = aiohttp.ClientSession(connector=connector)
-            sess = self._http_session
-        return sess
+            return self._http_session
 
     async def _send_in_process(
         self,
@@ -583,13 +656,28 @@ class Bus:
             f"to {len(matching)} subscribers"
         )
         
-        # Post* events never block the publisher. Gating semantics only
-        # apply to Pre* events; anything after the tool ran is observer
-        # traffic (audit, cost, KB update) that MUST NOT sit in the hot
-        # path. Kimi-vs-Opus test (24 Apr 2026) found Post-event blocking
-        # dominated task wall-time when heavy subscribers (DLP, auditor)
-        # processed large payloads synchronously.
-        if event.event_type.startswith("Post"):
+        # Observer events (see _OBSERVER_EVENT_TYPES) never block the
+        # publisher. Gating semantics apply to Pre* events; post-fact events
+        # are observer traffic (audit, cost tracking, KB update) that MUST
+        # NOT sit in the hot path. Subscribers configured as sync for an
+        # observer event still receive it - just as fire-and-forget. If a
+        # subscriber genuinely needs to block, model it as a Pre* hook.
+        if event.event_type in _OBSERVER_EVENT_TYPES:
+            # Observer-event demotion. A subscriber configured as sync for
+            # an observer event cannot gate it; warn once per (subscriber,
+            # event_type) so the operator knows this isn't a bug.
+            for sub in matching:
+                if sub.type == "sync":
+                    k = (sub.name, event.event_type)
+                    if k not in _observer_demoted_warned:
+                        _observer_demoted_warned.add(k)
+                        logger.warning(
+                            "subscriber %r is configured sync for observer event "
+                            "%s; demoting to async. Observer events never block "
+                            "the publisher. Move gating logic to a Pre* event if "
+                            "blocking is required.",
+                            sub.name, event.event_type,
+                        )
             sync_subscribers: list[SubscriberConfig] = []
             async_subscribers = list(matching)
         else:
@@ -648,7 +736,28 @@ class Bus:
 
             # Bus stamps agent_id authoritatively. Whatever the publisher put
             # there is ignored; identity comes from the token, not the payload.
-            publisher_id = request.get('publisher_id', '') or LEGACY_PUBLISHER_ID
+            # Fallback precedence:
+            #   - request carries a resolved publisher_id -> use it
+            #   - single-token legacy mode active -> LEGACY_PUBLISHER_ID
+            #   - multi-tenant configured but no id resolved -> 'unknown'
+            # The last case should never hit in practice (auth middleware
+            # always resolves before handler runs) but we never silently
+            # attribute to 'legacy' when legacy mode is not configured.
+            publisher_id = request.get('publisher_id', '')
+            if not publisher_id:
+                publisher_tokens = getattr(
+                    request.app, 'hookbus_publisher_tokens', {}
+                )
+                if not publisher_tokens:
+                    publisher_id = LEGACY_PUBLISHER_ID
+                else:
+                    logger.warning(
+                        'handle_http_request: multi-tenant mode active but '
+                        'no publisher_id resolved for event %s; stamping '
+                        "'unknown'. Investigate auth middleware.",
+                        getattr(event, 'event_id', '?'),
+                    )
+                    publisher_id = 'unknown'
             event.agent_id = publisher_id
 
             # Feature-flagged wire-format validators. "off" skips entirely,
@@ -748,11 +857,18 @@ class Bus:
         logger.info("Hot reload: send SIGHUP to reload subscribers.yaml")
 
     async def stop_server(self) -> None:
-        """Stop the HTTP server and release the shared HTTP session."""
+        """Stop the HTTP server and release the shared HTTP session.
+
+        Holds _http_session_lock while closing so an in-flight fan-out
+        cannot race: either _get_http_session observes closed=True before
+        close(), or it waits for the close to complete and then sees None
+        and constructs a fresh session (which in turn will fail cleanly
+        because _running is already False for downstream clients)."""
         self._running = False
-        sess = getattr(self, "_http_session", None)
-        if sess is not None and not sess.closed:
-            await sess.close()
+        async with self._http_session_lock:
+            sess = self._http_session
+            if sess is not None and not sess.closed:
+                await sess.close()
             self._http_session = None
         logger.info("Bus server stopped")
 
