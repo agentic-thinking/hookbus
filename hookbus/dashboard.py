@@ -107,16 +107,32 @@ class DashboardState:
         _meta = getattr(event, "metadata", {}) or {}
         _reasoning = _meta.get("reasoning_content") if isinstance(_meta, dict) else None
         _reasoning_chars = _meta.get("reasoning_chars", len(_reasoning or "")) if isinstance(_meta, dict) else 0
+        response_details = []
+        if responses:
+            for r in responses:
+                d = getattr(r, "decision", None)
+                response_details.append({
+                    "subscriber": getattr(r, "subscriber", None) or getattr(r, "name", "") or "",
+                    "decision": getattr(d, "value", str(d)).lower() if d is not None else "",
+                    "reason": getattr(r, "reason", "") or "",
+                    "metadata": getattr(r, "metadata", {}) or {},
+                    "latency_ms": getattr(r, "latency_ms", None),
+                })
         self._events.appendleft({
             "id": self._next_id,
             "ts": ts,
+            "event_id": getattr(event, "event_id", "") or "",
+            "session_id": getattr(event, "session_id", "") or "",
+            "correlation_id": getattr(event, "correlation_id", "") or "",
             "source": source,
             "tool_name": getattr(event, "tool_name", "") or "",
+            "tool_input": getattr(event, "tool_input", {}) or {},
             "event_type": getattr(event, "event_type", "") or "",
             "decision": decision_str,
             "reason": (reason or "")[:240],
             "latency_ms": round(latency_ms, 1),
             "metadata": _meta if isinstance(_meta, dict) else {},
+            "subscriber_responses": response_details,
             "reasoning_chars": int(_reasoning_chars or 0),
             "has_reasoning": bool(_reasoning),
         })
@@ -210,236 +226,126 @@ HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>HookBus™ Light</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HookBus Light</title>
 <style>
-:root{--bg:#0b0d10;--panel:#11151a;--line:#1d232b;--text:#e6edf3;--dim:#8b949e;
-      --green:#3fb950;--red:#f85149;--amber:#d29922;--blue:#58a6ff;--mono:'SF Mono',Menlo,Consolas,monospace;}
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--text);font:14px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
-header{padding:14px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;background:var(--panel)}
-.brand{font-family:var(--mono);font-weight:700;letter-spacing:1px;color:var(--green)}
-.brand span{color:var(--dim);font-weight:400;font-size:.78rem;margin-left:8px}
-.licence{font-family:var(--mono);font-size:.72rem;color:var(--dim)}
-.licence a{color:var(--blue);text-decoration:none}
-.licence a+a{margin-left:14px}
-.grid{display:grid;grid-template-columns:260px 340px 1fr;gap:14px;padding:14px}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px}
-.panel h2{font-size:.72rem;font-family:var(--mono);text-transform:uppercase;color:var(--dim);letter-spacing:1.5px;margin-bottom:10px}
-.kpi{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:.85rem}
-.kpi:last-child{border-bottom:0}
-.kpi b{font-weight:600}
-.kpi .v{color:var(--text)}
-.kpi .v.allow{color:var(--green)} .kpi .v.deny{color:var(--red)} .kpi .v.ask{color:var(--amber)}
-.sub{padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer}
-.sub:last-child{border-bottom:0}
-.sub:hover{background:rgba(88,166,255,0.04)}
-.sub.active{background:rgba(88,166,255,0.08);border-left:2px solid var(--blue);margin-left:-12px;padding-left:10px}
-.sub-name{font-family:var(--mono);font-size:.86rem;display:flex;justify-content:space-between;align-items:center}
-.sub-name .tag{color:var(--dim);font-size:.7rem;font-weight:400}
-.sub-meta{color:var(--dim);font-size:.7rem;font-family:var(--mono);margin-top:3px;display:flex;justify-content:space-between;gap:6px;flex-wrap:wrap}
-.sub-meta .vendor{color:var(--blue)}
-.sub-counts{display:flex;gap:8px;margin-top:6px;font-family:var(--mono);font-size:.72rem}
-.sub-counts span{color:var(--dim)}
-.sub-counts .n{font-weight:600}
-.sub-counts .n.allow{color:var(--green)} .sub-counts .n.deny{color:var(--red)} .sub-counts .n.ask{color:var(--amber)}
-.sub-action-row{margin-top:6px;font-family:var(--mono);font-size:.7rem}
-.sub-action{color:var(--dim)}
-.sub-action.ui{color:var(--blue);text-decoration:none}
-.sub-action.ui:hover{text-decoration:underline}
-.sub.has-ui .sub-name{color:var(--text)}
-.dot{width:8px;height:8px;border-radius:50%;display:inline-block;background:var(--dim);margin-right:6px}
-.dot.live{background:var(--green);box-shadow:0 0 6px var(--green)}
-.dot.silent{background:var(--dim)}
-.empty-hint{margin-top:12px;padding:10px;background:rgba(88,166,255,0.05);border-left:2px solid var(--blue);font-size:.72rem;color:var(--dim);font-family:var(--mono);line-height:1.5}
-.empty-hint code{color:var(--text);background:var(--bg);padding:1px 5px;border-radius:3px}
-.resource-list{margin-top:12px;display:grid;gap:8px;font-family:var(--mono);font-size:.72rem;line-height:1.45}
-.resource-list a{color:var(--blue);text-decoration:none}
-.resource-list a:hover{text-decoration:underline}
-.resource-list .note{color:var(--dim);border-top:1px solid var(--line);padding-top:8px}
-.events{max-height:calc(100vh - 110px);overflow-y:auto}
-.events-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
-.events-head h2{margin-bottom:0}
-.filter-chip{font-family:var(--mono);font-size:.7rem;padding:2px 8px;background:var(--blue);color:var(--bg);border-radius:10px;cursor:pointer;display:none}
-.filter-chip.on{display:inline-block}
-.filter-chip:hover{opacity:.8}
-.events table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:.78rem}
-.events th{text-align:left;padding:8px 10px;color:var(--dim);text-transform:uppercase;font-size:.65rem;letter-spacing:1px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)}
-.events td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
-.events tr.new td{animation:flash 1.2s ease-out}
-.ev-type{color:var(--dim);font-style:italic;opacity:.75}
-.events tr.filtered{display:none}
-@keyframes flash{from{background:#1d3a23}to{background:transparent}}
-.d-allow{color:var(--green);font-weight:600}
-.d-deny{color:var(--red);font-weight:600}
-.d-ask{color:var(--amber);font-weight:600}
-.empty{padding:20px;text-align:center;color:var(--dim);font-style:italic}
-footer{padding:10px 22px;border-top:1px solid var(--line);font-family:var(--mono);font-size:.68rem;color:var(--dim);display:flex;justify-content:space-between}
-footer a{color:var(--blue);text-decoration:none}
+:root{--bg:#f6f7f9;--panel:#fff;--ink:#15191f;--muted:#68707d;--line:#d8dde5;--soft:#eef1f5;
+--green:#18864b;--red:#c62828;--amber:#b77905;--blue:#1f5eff;--mono:'SF Mono',Menlo,Consolas,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
+.top{height:68px;background:var(--panel);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:28px;padding:0 28px}
+.brand{font-size:28px;font-weight:760;letter-spacing:-.02em}.pill{display:flex;align-items:center;gap:16px;border:1px solid var(--line);border-radius:8px;padding:9px 12px;background:#fafbfc}
+.dot{width:9px;height:9px;border-radius:999px;background:var(--green);display:inline-block;margin-right:7px}.muted{color:var(--muted)}.mono{font-family:var(--mono)}
+.links{margin-left:auto;display:flex;gap:16px;font-family:var(--mono);font-size:12px}
+.metrics{margin:18px 24px 12px;border:1px solid var(--line);background:var(--panel);border-radius:8px;display:grid;grid-template-columns:repeat(6,1fr)}
+.metric{padding:13px 16px;border-right:1px solid var(--line)}.metric:last-child{border-right:0}.metric b{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:3px}.metric span{font-family:var(--mono);font-weight:700}
+.toolbar{display:flex;gap:12px;align-items:center;padding:0 24px 12px}.toolbar input,.toolbar select{border:1px solid var(--line);border-radius:6px;background:#fff;padding:8px 10px;font:inherit;min-width:150px}.toolbar input{min-width:280px}.toolbar button{border:1px solid var(--line);background:#fff;border-radius:6px;padding:8px 10px;cursor:pointer}
+.shell{height:calc(100vh - 184px);min-height:480px;padding:0 24px 18px;display:grid;grid-template-columns:minmax(700px,1fr) 380px;gap:16px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}.panel-head{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;border-bottom:1px solid var(--line);font-weight:700}.panel-head small{font-weight:500;color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:13px}th{background:#2b3036;color:#fff;text-align:left;padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;position:sticky;top:0}td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}tbody tr{cursor:pointer}tbody tr:hover{background:#f1f6ff}tbody tr.selected{background:#e8f2ff}
+.badge{display:inline-block;min-width:58px;text-align:center;border-radius:6px;padding:5px 8px;font-weight:800;font-size:12px}.allow{background:#dff5e8;color:var(--green)}.deny{background:#ffe4e4;color:var(--red)}.ask{background:#fff2cc;color:var(--amber)}.other{background:#e9ecef;color:#4d5561}
+.reason{max-width:440px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.empty{padding:28px;text-align:center;color:var(--muted)}
+.inspector{display:flex;flex-direction:column}.section{padding:14px;border-bottom:1px solid var(--line)}.section h3{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.kv{display:grid;grid-template-columns:118px 1fr;gap:6px 10px;font-size:13px}.kv span:nth-child(odd){color:var(--muted)}pre{margin:0;background:#0f141a;color:#d7e1ed;border-radius:6px;padding:10px;overflow:auto;max-height:210px;font:12px/1.45 var(--mono)}
+.sub-row{border:1px solid var(--line);border-radius:6px;padding:8px;margin-bottom:8px}.sub-row b{font-family:var(--mono)}
+.foot{padding:10px 24px;border-top:1px solid var(--line);font-size:12px;color:var(--muted);display:flex;justify-content:space-between;background:#fff}.foot span:last-child{max-width:720px;text-align:right}
+@media(max-width:1100px){.shell{grid-template-columns:1fr;height:auto}.metrics{grid-template-columns:repeat(2,1fr)}.metric{border-bottom:1px solid var(--line)}.top{height:auto;flex-wrap:wrap;padding:16px 20px}.links{margin-left:0}}
 </style>
 </head>
 <body>
-<header>
-  <div class="brand">HOOKBUS™ <span>Light Edition</span></div>
-  <div class="licence">
-    <a href="https://agenticthinking.uk" target="_blank" rel="noopener">agenticthinking.uk</a>
-    <a href="https://github.com/agentic-thinking/hookbus" target="_blank" rel="noopener">GitHub</a>
-    <a href="https://github.com/agentic-thinking/cre-agentprotect" target="_blank" rel="noopener">CRE-AgentProtect</a>
-  </div>
-</header>
-<div class="grid">
-  <div class="panel">
-    <h2>Bus Stats</h2>
-    <div class="kpi"><b>Total</b><span class="v" id="s-total">0</span></div>
-    <div class="kpi"><b>Allow</b><span class="v allow" id="s-allow">0</span></div>
-    <div class="kpi"><b>Deny</b><span class="v deny" id="s-deny">0</span></div>
-    <div class="kpi"><b>Ask</b><span class="v ask" id="s-ask">0</span></div>
-    <div class="kpi"><b>Events / min</b><span class="v" id="s-epm">0</span></div>
-    <div class="kpi"><b>Uptime</b><span class="v" id="s-up">0s</span></div>
-  </div>
-  <div class="panel">
-    <h2>Connected Subscribers <span style="color:var(--dim);font-weight:400" id="sub-count"></span></h2>
-    <div id="sub-list"><div class="empty">no subscribers connected</div></div>
-    <div class="empty-hint">
-      Subscribers are external plug-ins. To <strong>add or remove</strong> one, edit
-      <code>subscribers.yaml</code> and restart the bus:
-      <code>docker compose restart hookbus</code>.
-      Hot-reload without restart is a HookBus Enterprise feature.
-    </div>
-    <div class="resource-list">
-      <a href="https://github.com/agentic-thinking/hookbus/blob/main/HOOKBUS_SPEC.md" target="_blank" rel="noopener">HookBus envelope specification</a>
-      <a href="https://github.com/agentic-thinking/cre-agentprotect" target="_blank" rel="noopener">CRE-AgentProtect Light AGT adapter</a>
-      <a href="https://github.com/microsoft/agent-governance-toolkit/tree/main/examples/policies" target="_blank" rel="noopener">Microsoft AGT example policy YAML files</a>
-      <div class="note">
-        To update AGT policy coverage in Light, update the AGT policy YAML used by
-        CRE-AgentProtect, then restart the subscriber:
-        <code>docker compose restart cre-agentprotect</code>.
-        Enterprise adds managed policy editing and approval workflows.
-      </div>
-    </div>
-  </div>
-  <div class="panel events">
-    <div class="events-head">
-      <h2>Live Events <span style="color:var(--dim);font-weight:400" id="ev-count"></span></h2>
-      <span class="filter-chip" id="filter-chip">filter: <span id="filter-name"></span> &times;</span>
-    </div>
-    <table><thead><tr>
-      <th>Time</th><th>Source</th><th>Tool</th><th>Decision</th><th>Latency</th><th>Reason</th>
-    </tr></thead><tbody id="ev-body">
-      <tr><td colspan="6" class="empty">waiting for events...</td></tr>
-    </tbody></table>
-  </div>
+<div class="top">
+  <div class="brand">HookBus Light</div>
+  <div class="pill"><span><i class="dot"></i>Bus online</span><span>Profile: <b>Light</b></span><span>Endpoint: <b class="mono" id="endpoint">localhost:18800</b></span><button id="copy-endpoint">Copy</button></div>
+  <div class="links"><a href="https://agenticthinking.uk" target="_blank" rel="noopener">agenticthinking.uk</a><a href="https://github.com/agentic-thinking/hookbus" target="_blank" rel="noopener">GitHub</a><a href="https://github.com/agentic-thinking/cre-agentprotect" target="_blank" rel="noopener">CRE-AgentProtect</a></div>
 </div>
-<footer>
-  <span>HookBus™ v__VERSION__ &middot; Apache 2.0 open source &middot; suitable for evaluation, development, and internal pilots</span>
-  <span><a href="https://agenticthinking.uk" target="_blank" rel="noopener">Agentic Thinking Ltd</a> &middot; Enterprise adds advanced subscribers, compliance workflows, policy management, audit exports, RBAC, and support.</span>
-</footer>
+<div class="metrics">
+  <div class="metric"><b>Publishers</b><span id="m-pubs">0</span></div>
+  <div class="metric"><b>Subscribers</b><span id="m-subs">0</span></div>
+  <div class="metric"><b>Events / min</b><span id="m-epm">0</span></div>
+  <div class="metric"><b>Allow</b><span class="allow-text" id="m-allow">0</span></div>
+  <div class="metric"><b>Deny / Ask</b><span><span id="m-deny">0</span> / <span id="m-ask">0</span></span></div>
+  <div class="metric"><b>Uptime</b><span id="m-up">0s</span></div>
+</div>
+<div class="toolbar">
+  <input id="q" placeholder="Filter events">
+  <select id="decision"><option value="">All decisions</option><option value="allow">Allow</option><option value="deny">Deny</option><option value="ask">Ask</option></select>
+  <select id="source"><option value="">All sources</option></select>
+  <button id="refresh">Refresh</button>
+</div>
+<div class="shell">
+  <div class="panel">
+    <div class="panel-head"><span>Event stream</span><small id="event-count">waiting for events</small></div>
+    <table><thead><tr><th>Time</th><th>Source</th><th>Event</th><th>Tool</th><th>Decision</th><th>Subscriber</th><th>Reason</th><th>Latency</th></tr></thead><tbody id="events"><tr><td colspan="8" class="empty">Waiting for events. Install a publisher or POST a test envelope.</td></tr></tbody></table>
+  </div>
+  <aside class="panel inspector">
+    <div class="panel-head"><span>Event details</span><small id="selected-label">select a row</small></div>
+    <div id="details" class="section"><div class="empty">Click an event to inspect the envelope, tool input, and subscriber response.</div></div>
+    <div class="section">
+      <h3>Subscribers</h3>
+      <div id="subs"></div>
+    </div>
+    <div class="section">
+      <h3>Policy configuration</h3>
+      <p class="muted">To update AGT policy coverage in Light, update the AGT policy YAML used by CRE-AgentProtect, then restart the subscriber:</p>
+      <pre>docker compose restart cre-agentprotect</pre>
+      <p><a href="https://github.com/microsoft/agent-governance-toolkit/tree/main/examples/policies" target="_blank" rel="noopener">Microsoft AGT example policy YAML files</a></p>
+    </div>
+  </aside>
+</div>
+<div class="foot">
+  <span>HookBus v__VERSION__ · Apache 2.0 open source · evaluation, development, and internal pilots</span>
+  <span>Enterprise adds advanced subscribers, compliance workflows, policy management, audit exports, RBAC, and support.</span>
+</div>
 <script>
-let lastId = 0;
-let activeFilter = null;
-const fmtTime = ts => new Date(ts*1000).toLocaleTimeString('en-GB',{hour12:false}) + '.' + String(Math.floor((ts%1)*1000)).padStart(3,'0');
-const fmtUp = s => { if(s<60)return s+'s'; if(s<3600)return Math.floor(s/60)+'m '+(s%60)+'s'; return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m'; };
-const esc = s => String(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-
-function applyFilter(){
-  const chip = document.getElementById('filter-chip');
-  const nameEl = document.getElementById('filter-name');
-  if(activeFilter){ chip.classList.add('on'); nameEl.textContent = activeFilter; }
-  else{ chip.classList.remove('on'); }
-  document.querySelectorAll('#sub-list .sub').forEach(el=>{
-    el.classList.toggle('active', el.dataset.name === activeFilter);
-  });
-  document.querySelectorAll('#ev-body tr').forEach(tr=>{
-    if(!activeFilter){ tr.classList.remove('filtered'); return; }
-    const reason = tr.dataset.reason || '';
-    tr.classList.toggle('filtered', !reason.includes('['+activeFilter+']'));
-  });
+let lastId=0, events=[], selected=null, subs=[], pubs={};
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const time=ts=>new Date(ts*1000).toLocaleTimeString('en-GB',{hour12:false});
+const up=s=>s<60?s+'s':s<3600?Math.floor(s/60)+'m '+s%60+'s':Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';
+const badge=d=>`<span class="badge ${['allow','deny','ask'].includes(d)?d:'other'}">${esc(String(d||'').toUpperCase())}</span>`;
+const subFromReason=r=>{const m=String(r||'').match(/\[([a-z0-9][a-z0-9_-]{0,63})\]/);return m?m[1]:'-';};
+const pretty=o=>esc(JSON.stringify(o??{},null,2));
+function filtered(){
+  const q=$('q').value.toLowerCase(), d=$('decision').value, s=$('source').value;
+  return events.filter(e=>(!d||e.decision===d)&&(!s||e.source===s)&&(!q||JSON.stringify(e).toLowerCase().includes(q)));
 }
-
-document.getElementById('filter-chip').addEventListener('click', ()=>{ activeFilter = null; applyFilter(); });
-
-async function tickStats(){
-  try{
-    const r = await fetch('/api/stats'); const d = await r.json();
-    document.getElementById('s-total').textContent = d.total;
-    document.getElementById('s-allow').textContent = d.allow;
-    document.getElementById('s-deny').textContent = d.deny;
-    document.getElementById('s-ask').textContent = d.ask;
-    document.getElementById('s-epm').textContent = d.events_per_min;
-    document.getElementById('s-up').textContent = fmtUp(d.uptime_s);
-  }catch(e){}
+function renderEvents(){
+  const rows=filtered();
+  $('event-count').textContent=rows.length?`showing ${rows.length}`:'waiting for events';
+  if(!rows.length){$('events').innerHTML='<tr><td colspan="8" class="empty">No matching events.</td></tr>';return}
+  $('events').innerHTML=rows.map(e=>`<tr data-id="${e.id}" class="${selected&&selected.id===e.id?'selected':''}">
+    <td class="mono">${time(e.ts)}</td><td>${esc(e.source||'-')}</td><td>${esc(e.event_type||'-')}</td><td>${esc(e.tool_name||'-')}</td><td>${badge(e.decision)}</td><td>${esc(subFromReason(e.reason))}</td><td class="reason">${esc(e.reason)}</td><td class="mono">${esc(e.latency_ms)}ms</td>
+  </tr>`).join('');
+  document.querySelectorAll('#events tr[data-id]').forEach(tr=>tr.onclick=()=>selectEvent(Number(tr.dataset.id)));
 }
-async function tickSubs(){
-  try{
-    const r = await fetch('/api/subscribers'); const d = await r.json();
-    const now = Date.now()/1000;
-    document.getElementById('sub-count').textContent = '(' + d.length + ')';
-    const list = document.getElementById('sub-list');
-    if(!d.length){ list.innerHTML='<div class="empty">no subscribers connected</div>'; return; }
-    list.innerHTML = d.map(s=>{
-      const live = s.last_seen && (now - s.last_seen) < 30;
-      const lat = s.avg_latency_ms != null ? s.avg_latency_ms.toFixed(1)+'ms avg' : '-';
-      const vendor = s.vendor ? `<span class="vendor">${esc(s.vendor)}</span>` : '<span style="color:var(--dim)">unknown vendor</span>';
-      const licence = s.licence ? esc(s.licence) : '';
-      const vl = licence ? `${vendor} &middot; ${licence}` : vendor;
-      const c = s.counts || {total:0,allow:0,deny:0,ask:0};
-      const hasUi = s.ui_port != null && s.ui_port !== '';
-      const uiUrl = hasUi ? `http://${window.location.hostname}:${s.ui_port}` : '';
-      const action = hasUi
-        ? `<a class="sub-action ui" href="${uiUrl}" target="_blank" rel="noopener">open dashboard &rarr;</a>`
-        : `<span class="sub-action filter">click to filter events</span>`;
-      return `<div class="sub ${hasUi?'has-ui':''}" data-name="${esc(s.name)}" data-has-ui="${hasUi?1:0}">
-        <div class="sub-name"><span><span class="dot ${live?'live':'silent'}"></span>${esc(s.name)}</span><span class="tag">${esc(s.type)} &middot; ${esc(s.transport)}</span></div>
-        <div class="sub-meta"><span>${vl}</span><span>${esc(lat)}</span></div>
-        <div class="sub-counts"><span><span class="n">${c.total}</span> events</span><span><span class="n allow">${c.allow}</span> allow</span><span><span class="n deny">${c.deny}</span> deny</span><span><span class="n ask">${c.ask}</span> ask</span></div>
-        <div class="sub-action-row">${action}</div>
-      </div>`;
-    }).join('');
-    document.querySelectorAll('#sub-list .sub').forEach(el=>{
-      el.addEventListener('click', (ev)=>{
-        // Allow real link clicks to pass through (new tab to subscriber dashboard)
-        if(ev.target.tagName === 'A') return;
-        if(el.dataset.hasUi === '1'){
-          const a = el.querySelector('a.sub-action');
-          if(a) window.open(a.href, '_blank', 'noopener');
-          return;
-        }
-        activeFilter = (activeFilter === el.dataset.name) ? null : el.dataset.name;
-        applyFilter();
-      });
-    });
-    applyFilter();
-  }catch(e){}
+function renderSources(){
+  const current=$('source').value;
+  const values=[...new Set(events.map(e=>e.source).filter(Boolean))].sort();
+  $('source').innerHTML='<option value="">All sources</option>'+values.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  if(values.includes(current))$('source').value=current;
 }
-async function tickEvents(){
-  try{
-    const r = await fetch('/api/events?since=' + lastId); const arr = await r.json();
-    if(!arr.length) return;
-    arr.forEach(e=>{ if(e.id > lastId) lastId = e.id; });
-    const body = document.getElementById('ev-body');
-    if(body.querySelector('.empty')) body.innerHTML='';
-    // Backend returns newest-first; iterate in reverse so insertBefore keeps chronological order within a poll batch.
-    for(let i = arr.length - 1; i >= 0; i--){
-      const e = arr[i];
-      const tr = document.createElement('tr');
-      tr.className = 'new';
-      tr.dataset.reason = e.reason || '';
-      const toolCell = e.tool_name
-        ? esc(e.tool_name)
-        : `<span class="ev-type">${esc(e.event_type || "")}</span>`;
-      tr.innerHTML = `<td>${fmtTime(e.ts)}</td><td>${esc(e.source)}</td><td>${toolCell}</td>
-        <td class="d-${esc(e.decision)}">${esc(e.decision.toUpperCase())}</td>
-        <td>${e.latency_ms||0}ms</td><td>${esc(e.reason)}</td>`;
-      body.insertBefore(tr, body.firstChild);
-    }
-    while(body.children.length > 200) body.removeChild(body.lastChild);
-    document.getElementById('ev-count').textContent = '(showing ' + body.children.length + ')';
-    applyFilter();
-  }catch(e){}
+function renderSubs(){
+  $('m-subs').textContent=subs.length;
+  $('subs').innerHTML=subs.length?subs.map(s=>{
+    const c=s.counts||{};
+    return `<div class="sub-row"><b>${esc(s.name)}</b> <span class="muted">${esc(s.type)} · ${esc(s.transport)}</span><div class="muted">${esc((s.events||[]).join(', '))}</div><div>allow ${c.allow||0} · deny ${c.deny||0} · ask ${c.ask||0}</div></div>`;
+  }).join(''):'<p class="muted">No subscribers configured.</p>';
 }
-tickStats(); tickSubs(); tickEvents();
-setInterval(tickStats, 2000);
-setInterval(tickSubs, 5000);
-setInterval(tickEvents, 1000);
+function selectEvent(id){
+  selected=events.find(e=>e.id===id)||null; renderEvents();
+  if(!selected)return;
+  $('selected-label').textContent='#'+selected.id;
+  const rs=selected.subscriber_responses||[];
+  $('details').innerHTML=`<div class="section"><h3>Summary</h3><div class="kv">
+    <span>Event ID</span><b class="mono">${esc(selected.event_id||selected.id)}</b><span>Session</span><span class="mono">${esc(selected.session_id||'-')}</span><span>Correlation</span><span class="mono">${esc(selected.correlation_id||'-')}</span><span>Source</span><span>${esc(selected.source||'-')}</span><span>Event type</span><span>${esc(selected.event_type||'-')}</span><span>Decision</span><span>${badge(selected.decision)}</span><span>Latency</span><span class="mono">${esc(selected.latency_ms)}ms</span>
+  </div></div><div class="section"><h3>Tool input</h3><pre>${pretty(selected.tool_input)}</pre></div><div class="section"><h3>Subscriber responses</h3>${rs.length?rs.map(r=>`<div class="sub-row"><b>${esc(r.subscriber)}</b> ${badge(r.decision)}<div>${esc(r.reason)}</div></div>`).join(''):`<div class="sub-row"><b>${esc(subFromReason(selected.reason))}</b> ${badge(selected.decision)}<div>${esc(selected.reason)}</div></div>`}</div><div class="section"><h3>Raw envelope</h3><pre>${pretty(selected)}</pre></div>`;
+}
+async function stats(){try{const d=await (await fetch('/api/stats')).json();$('m-epm').textContent=d.events_per_min;$('m-allow').textContent=d.allow;$('m-deny').textContent=d.deny;$('m-ask').textContent=d.ask;$('m-up').textContent=up(d.uptime_s)}catch(e){}}
+async function getSubs(){try{subs=await (await fetch('/api/subscribers')).json();renderSubs()}catch(e){}}
+async function getPubs(){try{pubs=await (await fetch('/api/publishers')).json();$('m-pubs').textContent=Object.keys(pubs).length}catch(e){}}
+async function getEvents(){try{const arr=await (await fetch('/api/events?since='+lastId)).json();if(!arr.length)return;arr.forEach(e=>{if(e.id>lastId)lastId=e.id});events=[...arr.reverse(),...events].slice(0,300);if(!selected)selected=events[0];renderSources();renderEvents();if(selected)selectEvent(selected.id)}catch(e){}}
+$('endpoint').textContent=location.host;$('copy-endpoint').onclick=()=>navigator.clipboard&&navigator.clipboard.writeText(location.origin+'/event');$('q').oninput=renderEvents;$('decision').onchange=renderEvents;$('source').onchange=renderEvents;$('refresh').onclick=()=>{stats();getSubs();getPubs();getEvents()};
+stats();getSubs();getPubs();getEvents();setInterval(stats,2000);setInterval(getSubs,5000);setInterval(getPubs,5000);setInterval(getEvents,1000);
 </script>
 </body>
 </html>
