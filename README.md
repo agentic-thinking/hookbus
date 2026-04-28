@@ -326,10 +326,12 @@ services:
   hookbus:
     environment:
       # publisher_id:token pairs, comma-separated
-      HOOKBUS_TOKENS: "hermes-prod:tok_AAA...,claude-code:tok_BBB...,openclaw:tok_CCC..."
+      HOOKBUS_TOKENS: "runtime-instance-01:tok_AAA...,runtime-instance-02:tok_BBB...,runtime-instance-03:tok_CCC..."
 ```
 
 `HOOKBUS_TOKEN` (single) and `HOOKBUS_TOKENS` (multi) can be combined, the single token falls through as the legacy publisher.
+
+Publishers can also send optional identity metadata such as `publisher_id`, `user_id`, `account_id`, `instance_id`, and `host_id`. Treat those as evidence unless the bus or your identity provider has verified them. Use pseudonymous IDs and never place passwords, bearer tokens, credentials, private IP addresses, or raw personal data in event metadata. Pseudonymous IDs are still attributable operational metadata and should follow your retention and access-control policy.
 
 ### Network binding
 

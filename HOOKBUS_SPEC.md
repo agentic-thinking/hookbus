@@ -340,7 +340,7 @@ The bus accepts a bearer token on every envelope. Publishers send `Authorization
 
 | Env var | Use case | Semantics |
 |---|---|---|
-| `HOOKBUS_TOKEN` | Single publisher | One shared token. Any envelope with that token is accepted. `event.agent_id` is untouched. |
+| `HOOKBUS_TOKEN` | Single publisher | One shared token. Any envelope with that token is accepted. `event.agent_id` is stamped with `HOOKBUS_LEGACY_PUBLISHER_ID` so legacy traffic remains distinguishable. |
 | `HOOKBUS_TOKENS` | Multi-tenant | Comma-separated `publisher_id:token` pairs. The bus resolves the presented bearer back to a `publisher_id` and stamps it onto `event.agent_id`. Subscribers can attribute every event to a known caller without trusting publisher-supplied `agent_id`. |
 
 ```yaml
@@ -348,10 +348,48 @@ The bus accepts a bearer token on every envelope. Publishers send `Authorization
 services:
   hookbus:
     environment:
-      HOOKBUS_TOKENS: "hermes-prod:tok_AAA...,claude-code:tok_BBB...,openclaw:tok_CCC..."
+      HOOKBUS_TOKENS: "runtime-instance-01:tok_AAA...,runtime-instance-02:tok_BBB...,runtime-instance-03:tok_CCC..."
 ```
 
 Both can be set at once. The bus resolves multi-tenant first (`HOOKBUS_TOKENS`), then falls through to the single-token check (`HOOKBUS_TOKEN`) on miss. Supported together primarily for migration scenarios - bring up the bus with single-token, then swap publishers to per-publisher tokens one at a time. Steady-state production should pick one mode.
+
+### Shared-bus identity metadata
+
+For one central HookBus serving many users, sessions, and runtime instances, publishers SHOULD include non-secret identity metadata:
+
+HookBus deployments may be single-publisher local installs, multi-publisher team buses, or centrally shared collectors across organisational boundaries. These metadata keys support the shared cases without requiring any deployment to adopt one global bus.
+
+| Metadata key | Purpose |
+|---|---|
+| `publisher_id` | Stable publisher package/type identifier, usually matching `agenthook.publisher.json`; not an individual installation |
+| `user_id` | Human user or pseudonymous user reference |
+| `account_id` | Runtime/provider account reference where distinct from `user_id` |
+| `instance_id` | Local publisher/runtime installation instance |
+| `host_id` | Machine, container, or workload identity, preferably pseudonymous |
+
+Subscriber policy MUST NOT rely on publisher-supplied identity alone when stronger bus or identity-provider verification is available. Do not put passwords, bearer tokens, private credentials, private IP addresses, or raw personal data in event metadata.
+
+Pseudonymous identifiers are still attributable operational metadata. Treat `user_id`, `account_id`, `instance_id`, and `host_id` as subject to retention, access-control, audit, and cross-border transfer policy. Pseudonymous does not mean anonymous.
+
+If HookBus verifies identity from authentication, it should keep publisher-supplied claims separate from verified identity. A subscriber may see a pattern like:
+
+```json
+{
+  "agent_id": "runtime-instance-01",
+  "metadata": {
+    "publisher_id": "uk.example.publisher.runtime",
+    "instance_id": "runtime-instance-01"
+  },
+  "annotations": {
+    "bus": {
+      "verified_identity": {
+        "method": "bearer_token",
+        "agent_id": "runtime-instance-01"
+      }
+    }
+  }
+}
+```
 
 ### Environment reference (bus)
 
