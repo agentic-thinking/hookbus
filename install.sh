@@ -307,6 +307,7 @@ ${C_G}${C_BOLD}HookBus Light is running.${C_RESET}
   ${C_BOLD}Profile:${C_RESET}    HookBus + CRE-AgentProtect Light$([[ "$WITH_AGENTSPEND" = "1" ]] && printf " + AgentSpend")
 
 Smoke test a manual event:
+  source "$ENV_FILE"
   curl -s -H "Authorization: Bearer \$HOOKBUS_TOKEN" \\
        -H "Content-Type: application/json" \\
        -d '{"event_id":"test","event_type":"PreToolUse","timestamp":"'$(date -Iseconds)'","source":"manual","session_id":"smoke","tool_name":"ping","tool_input":{},"metadata":{}}' \\
