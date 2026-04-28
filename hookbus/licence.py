@@ -1,6 +1,6 @@
 """HookBus tier + licence gate.
 
-Distinguishes Light (free, personal/non-production) from Enterprise (paid, commercial).
+Distinguishes Light (Apache 2.0 open source) from Enterprise (paid, commercial).
 Read at Bus.__init__; flags consulted by feature-gated code paths.
 
 v0.1.0 spec:
@@ -16,9 +16,10 @@ Light limits (enforced elsewhere by reading these flags):
   - persistent_event_store False
   - high_availability     False
 
-Personal-use licence terms:
-  Light is free for personal, educational, evaluation, and internal
-  non-production use. Production commercial use requires Enterprise.
+Light positioning:
+  Light is Apache 2.0 open source and suitable for evaluation,
+  development, and internal pilots. Enterprise adds advanced subscribers,
+  compliance workflows, policy management, audit exports, RBAC, and support.
 """
 
 from __future__ import annotations
@@ -107,9 +108,10 @@ def banner(licence: Licence, version: str) -> str:
         f"\n{_BAR}\n"
         f"  HookBus Light v{version}\n"
         f"  UK Patent GB2608069.7 (pending)\n\n"
-        f"  LICENCE: Free for personal, educational, evaluation,\n"
-        f"  and internal non-production use only.\n"
-        f"  Commercial production requires Enterprise: agenticthinking.uk\n\n"
+        f"  LICENCE: Apache 2.0 open source.\n"
+        f"  Suitable for evaluation, development, and internal pilots.\n"
+        f"  Enterprise adds advanced subscribers, compliance workflows,\n"
+        f"  policy management, audit exports, RBAC, and support.\n\n"
         f"  Disabled in this tier: hot-reload, advanced consolidation,\n"
         f"  failover groups, persistent store, HA, observability hooks,\n"
         f"  webhook integrations.\n"

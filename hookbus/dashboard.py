@@ -221,6 +221,7 @@ header{padding:14px 22px;border-bottom:1px solid var(--line);display:flex;align-
 .brand span{color:var(--dim);font-weight:400;font-size:.78rem;margin-left:8px}
 .licence{font-family:var(--mono);font-size:.72rem;color:var(--dim)}
 .licence a{color:var(--blue);text-decoration:none}
+.licence a+a{margin-left:14px}
 .grid{display:grid;grid-template-columns:260px 340px 1fr;gap:14px;padding:14px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px}
 .panel h2{font-size:.72rem;font-family:var(--mono);text-transform:uppercase;color:var(--dim);letter-spacing:1.5px;margin-bottom:10px}
@@ -251,6 +252,10 @@ header{padding:14px 22px;border-bottom:1px solid var(--line);display:flex;align-
 .dot.silent{background:var(--dim)}
 .empty-hint{margin-top:12px;padding:10px;background:rgba(88,166,255,0.05);border-left:2px solid var(--blue);font-size:.72rem;color:var(--dim);font-family:var(--mono);line-height:1.5}
 .empty-hint code{color:var(--text);background:var(--bg);padding:1px 5px;border-radius:3px}
+.resource-list{margin-top:12px;display:grid;gap:8px;font-family:var(--mono);font-size:.72rem;line-height:1.45}
+.resource-list a{color:var(--blue);text-decoration:none}
+.resource-list a:hover{text-decoration:underline}
+.resource-list .note{color:var(--dim);border-top:1px solid var(--line);padding-top:8px}
 .events{max-height:calc(100vh - 110px);overflow-y:auto}
 .events-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
 .events-head h2{margin-bottom:0}
@@ -275,7 +280,11 @@ footer a{color:var(--blue);text-decoration:none}
 <body>
 <header>
   <div class="brand">HOOKBUS™ <span>Light Edition</span></div>
-  <div class="licence"><a href="https://agenticthinking.uk" target="_blank">agenticthinking.uk</a></div>
+  <div class="licence">
+    <a href="https://agenticthinking.uk" target="_blank" rel="noopener">agenticthinking.uk</a>
+    <a href="https://github.com/agentic-thinking/hookbus" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/agentic-thinking/cre-agentprotect" target="_blank" rel="noopener">CRE-AgentProtect</a>
+  </div>
 </header>
 <div class="grid">
   <div class="panel">
@@ -294,12 +303,18 @@ footer a{color:var(--blue);text-decoration:none}
       Subscribers are external plug-ins. To <strong>add or remove</strong> one, edit
       <code>subscribers.yaml</code> and restart the bus:
       <code>docker compose restart hookbus</code>.
-      Hot-reload without restart is a HookBus Enterprise feature
-      (<a href="mailto:hello@agenticthinking.uk?subject=HookBus%20Enterprise" style="color:var(--blue)">contact us</a>).
-      See <a href="https://github.com/agentic-thinking/hookbus/blob/main/HOOKBUS_SPEC.md" style="color:var(--blue)">HOOKBUS_SPEC.md</a>
-      for the envelope protocol, or
-      <a href="https://github.com/agentic-thinking/hookbus/discussions" style="color:var(--blue)">join the community</a>
-      to share a subscriber you have built.
+      Hot-reload without restart is a HookBus Enterprise feature.
+    </div>
+    <div class="resource-list">
+      <a href="https://github.com/agentic-thinking/hookbus/blob/main/HOOKBUS_SPEC.md" target="_blank" rel="noopener">HookBus envelope specification</a>
+      <a href="https://github.com/agentic-thinking/cre-agentprotect" target="_blank" rel="noopener">CRE-AgentProtect Light AGT adapter</a>
+      <a href="https://github.com/microsoft/agent-governance-toolkit/tree/main/examples/policies" target="_blank" rel="noopener">Microsoft AGT example policy YAML files</a>
+      <div class="note">
+        To update AGT policy coverage in Light, update the AGT policy YAML used by
+        CRE-AgentProtect, then restart the subscriber:
+        <code>docker compose restart cre-agentprotect</code>.
+        Enterprise adds managed policy editing and approval workflows.
+      </div>
     </div>
   </div>
   <div class="panel events">
@@ -315,8 +330,8 @@ footer a{color:var(--blue);text-decoration:none}
   </div>
 </div>
 <footer>
-  <span>HookBus™ v__VERSION__ &middot; Apache 2.0 &middot; &copy; 2026 Agentic Thinking Ltd</span>
-  <span>HookBus&trade;. The agentic infrastructure.</span>
+  <span>HookBus™ v__VERSION__ &middot; Apache 2.0 open source &middot; suitable for evaluation, development, and internal pilots</span>
+  <span><a href="https://agenticthinking.uk" target="_blank" rel="noopener">Agentic Thinking Ltd</a> &middot; Enterprise adds advanced subscribers, compliance workflows, policy management, audit exports, RBAC, and support.</span>
 </footer>
 <script>
 let lastId = 0;
