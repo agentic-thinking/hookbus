@@ -161,9 +161,9 @@ fi
 
 sleep 3
 BUS_BASE="http://localhost:${HOOKBUS_PORT}"
+ROOT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BUS_BASE/" 2>/dev/null || true)
 if curl -sf -o /dev/null "$BUS_BASE/healthz" 2>/dev/null || \
-   curl -sf -o /dev/null "$BUS_BASE/" 2>/dev/null || \
-   curl -sf -o /dev/null -w "%{http_code}" "$BUS_BASE/" 2>/dev/null | grep -qE '^(200|401)$'; then
+   [[ "$ROOT_STATUS" =~ ^(200|401)$ ]]; then
   ok "Bus responding on $BUS_BASE"
 else
   warn "Bus not yet responding, may take a few more seconds on first boot."
