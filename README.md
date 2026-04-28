@@ -12,28 +12,34 @@
 
 ## Install (60 seconds)
 
-One shell command clones the bus, pulls the two free subscribers (AgentProtect + AgentSpend) as public Docker images, bootstraps a bearer token, and starts the stack. Interactive menu lets you pick a publisher shim for your agent runtime.
+One shell command clones the bus, pulls HookBus + CRE-AgentProtect Light as public Docker images, bootstraps a bearer token, and starts the stack. Interactive menu lets you pick a publisher shim for your agent runtime. CRE-AgentProtect Light is a policy enforcement adapter for Microsoft AGT.
 
 ```bash
-curl -fsSL https://agenticthinking.uk/install.sh | bash
+curl -fsSL https://hookbus.com/install.sh | bash
 ```
 
 Non-interactive variants:
 
 ```bash
 # Hermes-agent users
-curl -fsSL https://agenticthinking.uk/install.sh | bash -s -- --runtime hermes
+curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime hermes
 
 # OpenClaw users
-curl -fsSL https://agenticthinking.uk/install.sh | bash -s -- --runtime openclaw
+curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime openclaw
 
 # Bus + subscribers only, skip publisher
-curl -fsSL https://agenticthinking.uk/install.sh | bash -s -- --runtime skip --noninteractive
+curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime skip --noninteractive
+
+# Clean side-by-side install when you already have ~/.hookbus or another stack
+curl -fsSL https://hookbus.com/install.sh | bash -s -- --dir ./hookbus-light --port 18810 --runtime claude-code --noninteractive
+
+# Optional cost monitor dashboard as well as AgentProtect
+curl -fsSL https://hookbus.com/install.sh | bash -s -- --with-agentspend
 ```
 
 The script prints the dashboard URL + bearer token on completion. Re-run any time, it is idempotent.
 
-_Prefer not to pipe curl to bash? Inspect first:_ `curl -fsSL https://agenticthinking.uk/install.sh > install.sh && less install.sh && bash install.sh`
+_Prefer not to pipe curl to bash? Inspect first:_ `curl -fsSL https://hookbus.com/install.sh > install.sh && less install.sh && bash install.sh`
 
 ---
 
@@ -63,13 +69,13 @@ docker compose up -d
 echo "Dashboard: http://localhost:18800/?token=$HOOKBUS_TOKEN"
 ```
 
-That pulls `ghcr.io/agentic-thinking/hookbus:v0.1.0`, `cre-agentprotect:v0.1.0`, and `hookbus-agentspend:v0.1.0`, starts the bus + two free subscribers, and wires bearer-token auth across the stack.
+That pulls `ghcr.io/agentic-thinking/hookbus:latest` and `cre-agentprotect:latest`, starts the bus + AgentProtect Light, and wires bearer-token auth across the stack. To add AgentSpend, run `COMPOSE_PROFILES=agentspend docker compose up -d`.
 
 **Want to build from source instead?** Clone the three repos side-by-side (`hookbus`, `cre-agentprotect`, `hookbus-agentspend`) then `docker build -t ghcr.io/agentic-thinking/<name>:latest .` in each before `docker compose up -d`. Source stays private during preview, images are public.
 
 Open the link printed above in your browser. The token sets an auth cookie; refresh + navigation in that tab stays authenticated without re-passing it.
 
-That brings up **HookBus™** + **CRE-AgentProtect** (policy) + **HookBus-AgentSpend** (cost tracking), all talking to each other via the Compose network. Auth is on by default, see the [Security](#security) section below for pinning your own token, reverse-proxy recipes, and production hardening.
+That brings up **HookBus™** + **CRE-AgentProtect Light** (Microsoft AGT policy adapter), talking via the Compose network. Auth is on by default, see the [Security](#security) section below for pinning your own token, reverse-proxy recipes, and production hardening.
 
 ## Install a publisher shim for your agent runtime
 
@@ -78,7 +84,7 @@ Publishers live in a separate package per agent. All shims read `HOOKBUS_URL` + 
 ```bash
 # Pick up the token from the container and export for your shell
 export HOOKBUS_URL=http://localhost:18800/event
-export HOOKBUS_TOKEN=$(docker exec hookbus cat /root/.hookbus/.token)
+export HOOKBUS_TOKEN=$(docker compose exec -T hookbus cat /root/.hookbus/.token)
 ```
 
 Then install the shim for your runtime:
@@ -245,14 +251,14 @@ sed -i '/^HOOKBUS_TOKEN=/d' ~/.hermes/.env 2>/dev/null || true
 sed -i '/^HOOKBUS_TOKEN=/d' ~/hermes-agent/.env 2>/dev/null || true
 
 # Re-read the current token and export fresh
-export HOOKBUS_TOKEN=$(docker exec hookbus cat /root/.hookbus/.token)
+export HOOKBUS_TOKEN=$(docker compose exec -T hookbus cat /root/.hookbus/.token)
 ```
 
 Run the shim again. Events should land.
 
 ### AgentSpend container restarts repeatedly on first boot
 
-AgentSpend waits up to 30 seconds for the bus to write its token file to the
+AgentSpend is optional in HookBus Light. Start it with `COMPOSE_PROFILES=agentspend docker compose up -d`. It waits up to 30 seconds for the bus to write its token file to the
 shared volume. If it still can't find a token after that, it exits. Check that
 the `hookbus-auth` named volume is mounted on both the bus and the subscribers
 (see `docker-compose.yml`).
@@ -275,7 +281,7 @@ HookBus generates a random authentication token on first start and requires it o
 ### Read your token (one-time after install)
 
 ```bash
-docker exec hookbus cat /root/.hookbus/.token
+docker compose exec -T hookbus cat /root/.hookbus/.token
 ```
 
 Copy the value. Examples below use `$TOKEN` to mean that string.
@@ -286,7 +292,7 @@ Paste the full URL with the token once per dashboard:
 
 ```
 http://localhost:18800/?token=<your-token>     # HookBus bus + Light dashboard
-http://localhost:8883/?token=<your-token>      # HookBus-AgentSpend dashboard
+http://localhost:8883/?token=<your-token>      # HookBus-AgentSpend dashboard, if enabled
 ```
 
 The first load sets an HTTP-only cookie scoped to that host:port. Subsequent navigation in the same tab keeps you authenticated without the query param.
@@ -294,7 +300,7 @@ The first load sets an HTTP-only cookie scoped to that host:port. Subsequent nav
 ### Publishers authenticate via header
 
 ```bash
-export HOOKBUS_TOKEN=$(docker exec hookbus cat /root/.hookbus/.token)
+export HOOKBUS_TOKEN=$(docker compose exec -T hookbus cat /root/.hookbus/.token)
 # now any shim reads HOOKBUS_TOKEN and sends Authorization: Bearer <token>
 ```
 

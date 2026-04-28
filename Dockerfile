@@ -32,6 +32,6 @@ RUN chmod 755 /usr/local/bin/entrypoint.sh
 USER hookbus
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD python3 -c "import urllib.request,sys; r=urllib.request.urlopen('http://127.0.0.1:18800/', timeout=3); sys.exit(0 if r.status in (200,401) else 1)" || exit 1
+  CMD python3 -c "import urllib.request,sys; r=urllib.request.urlopen('http://127.0.0.1:18800/healthz', timeout=3); sys.exit(0 if r.status == 200 else 1)" || exit 1
 
 ENTRYPOINT ["entrypoint.sh"]

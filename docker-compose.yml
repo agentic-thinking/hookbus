@@ -1,12 +1,14 @@
 # HookBus Light. The open-source runtime governance layer for autonomous AI agents.
 #
-# Starts HookBus on :18800 (bus + Light dashboard) with two MIT subscribers:
-#   CRE-AgentProtect (policy enforcement via Microsoft AGT, sync)
-#   AgentSpend       (token-cost monitor, async, dashboard on :8883)
+# Starts HookBus on :18800 (bus + Light dashboard) with CRE-AgentProtect Light:
+#   CRE-AgentProtect (policy enforcement adapter for Microsoft AGT, sync)
+#
+# Optional:
+#   COMPOSE_PROFILES=agentspend docker compose up -d
 #
 # Quick start:
 #   docker compose up -d
-#   TOKEN=$(docker exec hookbus cat /root/.hookbus/.token)
+#   TOKEN=$(docker compose exec -T hookbus cat /root/.hookbus/.token)
 #   echo "Dashboard: http://localhost:18800/?token=$TOKEN"
 #
 # The bus generates a bearer token on first boot and writes it to the shared
@@ -16,9 +18,8 @@
 services:
   hookbus:
     image: ghcr.io/agentic-thinking/hookbus:latest
-    container_name: hookbus
     ports:
-      - "18800:18800"
+      - "${HOOKBUS_PORT:-18800}:18800"
     environment:
       # Pin the bearer token so it survives container restarts.
       # Generate once: HOOKBUS_TOKEN=$(openssl rand -base64 32) docker compose up -d
@@ -33,7 +34,6 @@ services:
 
   cre-agentprotect:
     image: ghcr.io/agentic-thinking/cre-agentprotect:latest
-    container_name: cre-agentprotect
     expose:
       - "8878"
     volumes:
@@ -43,10 +43,11 @@ services:
       - hookbus
 
   agentspend:
+    profiles:
+      - agentspend
     image: ghcr.io/agentic-thinking/hookbus-agentspend:latest
-    container_name: agentspend
     ports:
-      - "8883:8879"
+      - "${AGENTSPEND_PORT:-8883}:8879"
     volumes:
       - hookbus-auth:/root/.hookbus:ro
       - agentspend-data:/root/.agentspend

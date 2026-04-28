@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # HookBus Light one-shot installer.
 # Usage:
-#   curl -fsSL https://agenticthinking.uk/install.sh | bash
-#   curl -fsSL https://agenticthinking.uk/install.sh | bash -s -- --runtime hermes
-#   curl -fsSL https://agenticthinking.uk/install.sh | bash -s -- --runtime openclaw
+#   curl -fsSL https://hookbus.com/install.sh | bash
+#   curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime claude-code
+#   curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime skip --noninteractive
 #
-# Clones the bus, pulls the two free subscribers (AgentProtect + AgentSpend)
-# as public Docker images, bootstraps a bearer token, starts the stack, and
-# optionally installs the publisher plugin for your chosen agent runtime.
+# Clones the bus, pulls HookBus + CRE-AgentProtect Light as public Docker
+# images, bootstraps a bearer token, starts the stack, and optionally installs
+# the publisher plugin for your chosen agent runtime.
 #
 # Idempotent. Safe to re-run. Apache 2.0 + MIT throughout.
 
@@ -16,10 +16,13 @@ set -euo pipefail
 # ----------------------------------------------------------------------------
 # Config
 # ----------------------------------------------------------------------------
-HOOKBUS_DIR="${HOOKBUS_DIR:-$HOME/.hookbus}"
+HOOKBUS_DIR="${HOOKBUS_DIR:-$HOME/hookbus-light}"
 HOOKBUS_REPO="${HOOKBUS_REPO:-https://github.com/agentic-thinking/hookbus.git}"
 RUNTIME="${RUNTIME:-}"
 NONINTERACTIVE="${NONINTERACTIVE:-0}"
+WITH_AGENTSPEND="${WITH_AGENTSPEND:-0}"
+HOOKBUS_PORT="${HOOKBUS_PORT:-18800}"
+AGENTSPEND_PORT="${AGENTSPEND_PORT:-8883}"
 
 # Parse args (supported after `--` when piped from curl | bash)
 while [[ $# -gt 0 ]]; do
@@ -29,6 +32,27 @@ while [[ $# -gt 0 ]]; do
     --noninteractive) NONINTERACTIVE=1; shift ;;
     --dir)            HOOKBUS_DIR="${2:-}"; shift 2 ;;
     --dir=*)          HOOKBUS_DIR="${1#*=}"; shift ;;
+    --port)           HOOKBUS_PORT="${2:-}"; shift 2 ;;
+    --port=*)         HOOKBUS_PORT="${1#*=}"; shift ;;
+    --agentspend-port) AGENTSPEND_PORT="${2:-}"; shift 2 ;;
+    --agentspend-port=*) AGENTSPEND_PORT="${1#*=}"; shift ;;
+    --with-agentspend) WITH_AGENTSPEND=1; shift ;;
+    --profile)
+      profile="${2:-light}"
+      case "$profile" in
+        agentprotect|light|"") WITH_AGENTSPEND=0 ;;
+        agentspend|full) WITH_AGENTSPEND=1 ;;
+        *) printf "! Unknown profile '%s', using Light default\n" "$profile" >&2 ;;
+      esac
+      shift
+      [[ $# -gt 0 ]] && shift ;;
+    --profile=*)
+      case "${1#*=}" in
+        agentprotect|light|"") WITH_AGENTSPEND=0 ;;
+        agentspend|full) WITH_AGENTSPEND=1 ;;
+        *) printf "! Unknown profile '%s', using Light default\n" "${1#*=}" >&2 ;;
+      esac
+      shift ;;
     -h|--help)
       grep '^#' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
@@ -57,8 +81,8 @@ die()  { printf "%sx %s%s\n" "$C_R" "$*" "$C_RESET" >&2; exit 1; }
 cat <<BANNER
 
 ${C_BOLD}HookBus Light installer${C_RESET}
-Open-source event bus for AI agent lifecycle governance + cost tracking.
-Apache 2.0 bus. MIT subscribers. Docker-based, 15 seconds to first event.
+Open-source event bus for AI agent lifecycle governance.
+Apache 2.0 bus. CRE-AgentProtect Light adapter. Docker-based, 15 seconds to first event.
 Docs: https://github.com/agentic-thinking/hookbus
 
 BANNER
@@ -92,6 +116,10 @@ if [[ -d "$HOOKBUS_DIR/.git" ]]; then
   say "Updating existing install at $HOOKBUS_DIR"
   (cd "$HOOKBUS_DIR" && git pull --quiet --rebase origin main) || \
     warn "git pull failed; keeping existing tree"
+elif [[ -e "$HOOKBUS_DIR" ]]; then
+  die "Install directory exists but is not a HookBus git checkout: $HOOKBUS_DIR
+Choose a clean directory, for example:
+  curl -fsSL https://hookbus.com/install.sh | bash -s -- --dir ./hookbus-light"
 else
   say "Cloning bus to $HOOKBUS_DIR"
   git clone --quiet "$HOOKBUS_REPO" "$HOOKBUS_DIR"
@@ -118,22 +146,30 @@ fi
 
 # shellcheck disable=SC1090
 set -a; . "$ENV_FILE"; set +a
+export HOOKBUS_PORT AGENTSPEND_PORT
 
 # ----------------------------------------------------------------------------
 # Start the stack
 # ----------------------------------------------------------------------------
-say "Starting bus + AgentProtect + AgentSpend (docker compose up -d)..."
-docker compose up -d 2>&1 | tail -10 || die "docker compose failed"
+if [[ "$WITH_AGENTSPEND" = "1" ]]; then
+  say "Starting HookBus + CRE-AgentProtect Light + AgentSpend..."
+  COMPOSE_PROFILES=agentspend docker compose up -d 2>&1 | tail -10 || die "docker compose failed"
+else
+  say "Starting HookBus + CRE-AgentProtect Light..."
+  docker compose up -d hookbus cre-agentprotect 2>&1 | tail -10 || die "docker compose failed"
+fi
 
 sleep 3
-if curl -sf -o /dev/null http://localhost:18800/ 2>/dev/null || \
-   curl -sf -o /dev/null -w "%{http_code}" http://localhost:18800/ 2>/dev/null | grep -qE '^(200|401)$'; then
-  ok "Bus responding on http://localhost:18800"
+BUS_BASE="http://localhost:${HOOKBUS_PORT}"
+if curl -sf -o /dev/null "$BUS_BASE/healthz" 2>/dev/null || \
+   curl -sf -o /dev/null "$BUS_BASE/" 2>/dev/null || \
+   curl -sf -o /dev/null -w "%{http_code}" "$BUS_BASE/" 2>/dev/null | grep -qE '^(200|401)$'; then
+  ok "Bus responding on $BUS_BASE"
 else
   warn "Bus not yet responding, may take a few more seconds on first boot."
 fi
 
-DASH_URL="http://localhost:18800/?token=${HOOKBUS_TOKEN}"
+DASH_URL="$BUS_BASE/?token=${HOOKBUS_TOKEN}"
 
 # ----------------------------------------------------------------------------
 # Publisher selection
@@ -181,7 +217,7 @@ install_hermes() {
   ok "Hermes publisher installed."
   cat <<HINT
   Next: pin these env vars before starting hermes-agent
-    export HOOKBUS_URL=http://localhost:18800/event
+    export HOOKBUS_URL=$BUS_BASE/event
     export HOOKBUS_TOKEN=$HOOKBUS_TOKEN
   (HOOKBUS_SOURCE defaults to "hermes-agent" inside the publisher;
    do NOT export HOOKBUS_SOURCE in your shell profile, it will leak
@@ -198,7 +234,7 @@ install_claude_code() {
     warn "clone failed"; rm -rf "$TMP_DIR"; return 1
   }
 
-  (cd "$TMP_DIR/src" && HOOKBUS_URL="http://localhost:18800/event" HOOKBUS_TOKEN="$HOOKBUS_TOKEN" ./install.sh 2>&1 | tail -20) \
+  (cd "$TMP_DIR/src" && HOOKBUS_URL="$BUS_BASE/event" HOOKBUS_TOKEN="$HOOKBUS_TOKEN" ./install.sh 2>&1 | tail -20) \
     || warn "install.sh reported issues"
   rm -rf "$TMP_DIR"
 
@@ -239,7 +275,7 @@ install_openclaw() {
   (~/.config/systemd/user/openclaw-gateway.service.d/hookbus.conf):
 
     [Service]
-    Environment="HOOKBUS_URL=http://localhost:18800/event"
+    Environment="HOOKBUS_URL=$BUS_BASE/event"
     Environment="HOOKBUS_TOKEN=$HOOKBUS_TOKEN"
     Environment="HOOKBUS_FAIL_MODE=closed"
     Environment="HOOKBUS_SOURCE=openclaw"
@@ -268,11 +304,12 @@ ${C_G}${C_BOLD}HookBus Light is running.${C_RESET}
   ${C_BOLD}Compose:${C_RESET}    cd $HOOKBUS_DIR && docker compose ps
   ${C_BOLD}Stop:${C_RESET}       cd $HOOKBUS_DIR && docker compose down
   ${C_BOLD}Docs:${C_RESET}       https://github.com/agentic-thinking/hookbus
+  ${C_BOLD}Profile:${C_RESET}    HookBus + CRE-AgentProtect Light$([[ "$WITH_AGENTSPEND" = "1" ]] && printf " + AgentSpend")
 
 Smoke test a manual event:
   curl -s -H "Authorization: Bearer \$HOOKBUS_TOKEN" \\
        -H "Content-Type: application/json" \\
        -d '{"event_id":"test","event_type":"PreToolUse","timestamp":"'$(date -Iseconds)'","source":"manual","session_id":"smoke","tool_name":"ping","tool_input":{},"metadata":{}}' \\
-       http://localhost:18800/event
+       $BUS_BASE/event
 
 DONE

@@ -219,8 +219,8 @@ def _validate_subscriber_address(address: str) -> None:
 
 @aiohttp.web.middleware
 async def _auth_middleware(request, handler):
-    # Exempt: OPTIONS for CORS preflight (if any)
-    if request.method == 'OPTIONS':
+    # Exempt: OPTIONS for CORS preflight and health probes.
+    if request.method == 'OPTIONS' or request.path == '/healthz':
         return await handler(request)
     legacy_token = getattr(request.app, 'hookbus_token', '')
     publisher_tokens: Dict[str, str] = getattr(request.app, 'hookbus_publisher_tokens', {})
@@ -732,6 +732,30 @@ class Bus:
         publishers can migrate at their own pace."""
         try:
             data = await request.json()
+        except Exception:
+            return aiohttp.web.json_response(
+                {"error": "invalid json"},
+                status=400,
+            )
+
+        if not isinstance(data, dict):
+            return aiohttp.web.json_response(
+                {"error": "invalid event", "detail": "event payload must be a JSON object"},
+                status=400,
+            )
+
+        required = ("event_id", "event_type", "timestamp", "source", "session_id")
+        missing = [field for field in required if field not in data]
+        if missing:
+            return aiohttp.web.json_response(
+                {
+                    "error": "invalid event",
+                    "detail": "missing required field(s): " + ", ".join(missing),
+                },
+                status=400,
+            )
+
+        try:
             event = HookEvent.from_dict(data)
 
             # Bus stamps agent_id authoritatively. Whatever the publisher put
@@ -832,6 +856,14 @@ class Bus:
             '  Reasoning validator: %s | Correlation validator: %s',
             _REASONING_STRICTNESS, _CORRELATION_STRICTNESS,
         )
+        async def healthz(_request: aiohttp.web.Request) -> aiohttp.web.Response:
+            return aiohttp.web.json_response({
+                "status": "ok",
+                "service": "hookbus",
+                "subscribers": len(self._subscribers),
+            })
+
+        app.router.add_get("/healthz", healthz)
         app.router.add_post("/event", self.handle_http_request)
         # Register HookBus Light dashboard routes (GET /, /api/stats, /api/events,
         # /api/subscribers, /api/publishers) on the same aiohttp app.
