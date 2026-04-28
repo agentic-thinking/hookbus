@@ -270,6 +270,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}th{background:#2b3036;c
   <input id="q" placeholder="Filter events">
   <select id="decision"><option value="">All decisions</option><option value="allow">Allow</option><option value="deny">Deny</option><option value="ask">Ask</option></select>
   <select id="source"><option value="">All sources</option></select>
+  <select id="sort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select>
   <button id="refresh">Refresh</button>
 </div>
 <div class="shell">
@@ -307,7 +308,9 @@ const subFromReason=r=>{const m=String(r||'').match(/\[([a-z0-9][a-z0-9_-]{0,63}
 const pretty=o=>esc(JSON.stringify(o??{},null,2));
 function filtered(){
   const q=$('q').value.toLowerCase(), d=$('decision').value, s=$('source').value;
-  return events.filter(e=>(!d||e.decision===d)&&(!s||e.source===s)&&(!q||JSON.stringify(e).toLowerCase().includes(q)));
+  const rows = events.filter(e=>(!d||e.decision===d)&&(!s||e.source===s)&&(!q||JSON.stringify(e).toLowerCase().includes(q)));
+  rows.sort((a,b)=>$('sort').value==='oldest'?a.ts-b.ts:b.ts-a.ts);
+  return rows;
 }
 function renderEvents(){
   const rows=filtered();
@@ -338,13 +341,21 @@ function selectEvent(id){
   const rs=selected.subscriber_responses||[];
   $('details').innerHTML=`<div class="section"><h3>Summary</h3><div class="kv">
     <span>Event ID</span><b class="mono">${esc(selected.event_id||selected.id)}</b><span>Session</span><span class="mono">${esc(selected.session_id||'-')}</span><span>Correlation</span><span class="mono">${esc(selected.correlation_id||'-')}</span><span>Source</span><span>${esc(selected.source||'-')}</span><span>Event type</span><span>${esc(selected.event_type||'-')}</span><span>Decision</span><span>${badge(selected.decision)}</span><span>Latency</span><span class="mono">${esc(selected.latency_ms)}ms</span>
-  </div></div><div class="section"><h3>Tool input</h3><pre>${pretty(selected.tool_input)}</pre></div><div class="section"><h3>Subscriber responses</h3>${rs.length?rs.map(r=>`<div class="sub-row"><b>${esc(r.subscriber)}</b> ${badge(r.decision)}<div>${esc(r.reason)}</div></div>`).join(''):`<div class="sub-row"><b>${esc(subFromReason(selected.reason))}</b> ${badge(selected.decision)}<div>${esc(selected.reason)}</div></div>`}</div><div class="section"><h3>Raw envelope</h3><pre>${pretty(selected)}</pre></div>`;
+  </div></div><div class="section"><h3>Tool input</h3><pre>${pretty(selected.tool_input)}</pre></div>${llmEvidence(selected)}<div class="section"><h3>Subscriber responses</h3>${rs.length?rs.map(r=>`<div class="sub-row"><b>${esc(r.subscriber)}</b> ${badge(r.decision)}<div>${esc(r.reason)}</div></div>`).join(''):`<div class="sub-row"><b>${esc(subFromReason(selected.reason))}</b> ${badge(selected.decision)}<div>${esc(selected.reason)}</div></div>`}</div><div class="section"><h3>Raw envelope</h3><pre>${pretty(selected)}</pre></div>`;
+}
+function llmEvidence(e){
+  const m=e.metadata||{};
+  const reasoning=m.reasoning_content||m.reasoning||m.thinking||'';
+  const response=m.response_text||m.reply_text||m.model_response||m.content||'';
+  const model=m.model||m.model_id||m.provider||'';
+  if(!reasoning&&!response&&!model&&!e.has_reasoning)return '';
+  return `<div class="section"><h3>LLM evidence</h3><div class="kv"><span>Model</span><span class="mono">${esc(model||'-')}</span><span>Reasoning chars</span><span class="mono">${esc(m.reasoning_chars||e.reasoning_chars||0)}</span></div>${reasoning?`<h3 style="margin-top:12px">Reasoning</h3><pre>${esc(reasoning)}</pre>`:''}${response?`<h3 style="margin-top:12px">Response</h3><pre>${esc(response)}</pre>`:''}</div>`;
 }
 async function stats(){try{const d=await (await fetch('/api/stats')).json();$('m-epm').textContent=d.events_per_min;$('m-allow').textContent=d.allow;$('m-deny').textContent=d.deny;$('m-ask').textContent=d.ask;$('m-up').textContent=up(d.uptime_s)}catch(e){}}
 async function getSubs(){try{subs=await (await fetch('/api/subscribers')).json();renderSubs()}catch(e){}}
 async function getPubs(){try{pubs=await (await fetch('/api/publishers')).json();$('m-pubs').textContent=Object.keys(pubs).length}catch(e){}}
 async function getEvents(){try{const arr=await (await fetch('/api/events?since='+lastId)).json();if(!arr.length)return;arr.forEach(e=>{if(e.id>lastId)lastId=e.id});events=[...arr.reverse(),...events].slice(0,300);if(!selected)selected=events[0];renderSources();renderEvents();if(selected)selectEvent(selected.id)}catch(e){}}
-$('endpoint').textContent=location.host;$('copy-endpoint').onclick=()=>navigator.clipboard&&navigator.clipboard.writeText(location.origin+'/event');$('q').oninput=renderEvents;$('decision').onchange=renderEvents;$('source').onchange=renderEvents;$('refresh').onclick=()=>{stats();getSubs();getPubs();getEvents()};
+$('endpoint').textContent=location.host;$('copy-endpoint').onclick=()=>navigator.clipboard&&navigator.clipboard.writeText(location.origin+'/event');$('q').oninput=renderEvents;$('decision').onchange=renderEvents;$('source').onchange=renderEvents;$('sort').onchange=renderEvents;$('refresh').onclick=()=>{stats();getSubs();getPubs();getEvents()};
 stats();getSubs();getPubs();getEvents();setInterval(stats,2000);setInterval(getSubs,5000);setInterval(getPubs,5000);setInterval(getEvents,1000);
 </script>
 </body>
