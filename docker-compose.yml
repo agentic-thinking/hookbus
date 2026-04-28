@@ -28,7 +28,7 @@ services:
       # they are re-synced. Always pin this in production.
       HOOKBUS_TOKEN: "${HOOKBUS_TOKEN:-}"
     volumes:
-      - ./subscribers.yaml:/root/.hookbus/subscribers.yaml:ro
+      - ${HOOKBUS_SUBSCRIBERS_FILE:-./subscribers.yaml}:/root/.hookbus/subscribers.yaml:ro
       - hookbus-auth:/root/.hookbus
     restart: unless-stopped
 

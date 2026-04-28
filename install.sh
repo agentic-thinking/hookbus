@@ -153,7 +153,7 @@ export HOOKBUS_PORT AGENTSPEND_PORT
 # ----------------------------------------------------------------------------
 if [[ "$WITH_AGENTSPEND" = "1" ]]; then
   say "Starting HookBus + CRE-AgentProtect Light + AgentSpend..."
-  COMPOSE_PROFILES=agentspend docker compose up -d 2>&1 | tail -10 || die "docker compose failed"
+  HOOKBUS_SUBSCRIBERS_FILE=./subscribers.with-agentspend.yaml COMPOSE_PROFILES=agentspend docker compose up -d 2>&1 | tail -10 || die "docker compose failed"
 else
   say "Starting HookBus + CRE-AgentProtect Light..."
   docker compose up -d hookbus cre-agentprotect 2>&1 | tail -10 || die "docker compose failed"
