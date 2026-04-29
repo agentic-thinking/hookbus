@@ -182,19 +182,21 @@ ${C_BOLD}Which agent runtime do you want to wire into HookBus?${C_RESET}
   1) Claude Code (Anthropic, subprocess hook)
   2) Hermes      (Nous Research, Python plugin)
   3) OpenClaw    (Node plugin)
-  4) Skip        (wire publishers manually later)
+  4) Codex CLI   (OpenAI, hook runner)
+  5) Skip        (wire publishers manually later)
 
 MENU
-    read -r -p "Choice [1-4]: " choice
+    read -r -p "Choice [1-5]: " choice
     case "$choice" in
       1) RUNTIME="claude-code" ;;
       2) RUNTIME="hermes" ;;
       3) RUNTIME="openclaw" ;;
-      4|"") RUNTIME="skip" ;;
+      4) RUNTIME="codex" ;;
+      5|"") RUNTIME="skip" ;;
       *) warn "Unknown choice '$choice', skipping publisher step"; RUNTIME="skip" ;;
     esac
   else
-    warn "No TTY for interactive prompt. Re-run with --runtime claude-code|hermes|openclaw|skip. Skipping for now."
+    warn "No TTY for interactive prompt. Re-run with --runtime claude-code|codex|hermes|openclaw|skip. Skipping for now."
     RUNTIME="skip"
   fi
 fi
@@ -245,6 +247,34 @@ install_claude_code() {
 HINT
 }
 
+install_codex() {
+  say "Installing Codex CLI publisher..."
+  if ! command -v node >/dev/null; then
+    warn "node is required for the Codex publisher. Install Node.js 18+ and re-run with --runtime codex."
+    return 1
+  fi
+
+  local TMP_DIR
+  TMP_DIR=$(mktemp -d)
+
+  git clone --quiet https://github.com/agentic-thinking/hookbus-publisher-codex.git "$TMP_DIR/src" || {
+    warn "clone failed"; rm -rf "$TMP_DIR"; return 1
+  }
+
+  (cd "$TMP_DIR/src" && HOOKBUS_URL="$BUS_BASE/event" HOOKBUS_TOKEN="$HOOKBUS_TOKEN" ./install.sh 2>&1 | tail -24) \
+    || warn "install.sh reported issues"
+  rm -rf "$TMP_DIR"
+
+  ok "Codex CLI publisher installed."
+  cat <<HINT
+  Important: fully quit and restart Codex. Already-running Codex sessions
+  do not reload hooks.
+
+  Verify:
+    $HOME/.local/bin/codex-gate --doctor
+HINT
+}
+
 install_openclaw() {
   say "Installing OpenClaw publisher..."
   if ! command -v npm >/dev/null; then
@@ -286,10 +316,11 @@ HINT
 
 case "$RUNTIME" in
   claude-code) install_claude_code || warn "Claude Code publisher install had issues." ;;
+  codex)       install_codex       || warn "Codex publisher install had issues." ;;
   hermes)      install_hermes      || warn "Hermes publisher install had issues." ;;
   openclaw)    install_openclaw    || warn "OpenClaw publisher install had issues." ;;
   skip|"")     warn "Skipped publisher install. See $HOOKBUS_REPO for the full shim table." ;;
-  *)           warn "Unsupported runtime '$RUNTIME'. Accepted: claude-code, hermes, openclaw, skip." ;;
+  *)           warn "Unsupported runtime '$RUNTIME'. Accepted: claude-code, codex, hermes, openclaw, skip." ;;
 esac
 
 # ----------------------------------------------------------------------------
@@ -305,6 +336,12 @@ ${C_G}${C_BOLD}HookBus Light is running.${C_RESET}
   ${C_BOLD}Stop:${C_RESET}       cd $HOOKBUS_DIR && docker compose down
   ${C_BOLD}Docs:${C_RESET}       https://github.com/agentic-thinking/hookbus
   ${C_BOLD}Profile:${C_RESET}    HookBus + CRE-AgentProtect Light$([[ "$WITH_AGENTSPEND" = "1" ]] && printf " + AgentSpend")
+
+Install another publisher against this bus:
+  source "$ENV_FILE"
+  export HOOKBUS_URL=$BUS_BASE/event
+  curl -fsSL https://hookbus.com/publishers/claude-code | bash
+  curl -fsSL https://hookbus.com/publishers/codex | bash
 
 Smoke test a manual event:
   source "$ENV_FILE"
