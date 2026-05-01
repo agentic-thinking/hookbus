@@ -865,7 +865,7 @@ class Bus:
 
         app.router.add_get("/healthz", healthz)
         app.router.add_post("/event", self.handle_http_request)
-        # Register HookBus Light dashboard routes (GET /, /api/stats, /api/events,
+        # Register HookBus dashboard routes (GET /, /api/stats, /api/events,
         # /api/subscribers, /api/publishers) on the same aiohttp app.
         register_dashboard_routes(app, self)
         

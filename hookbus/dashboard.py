@@ -1,6 +1,6 @@
-"""HookBus Light dashboard.
+"""HookBus dashboard.
 
-Read-only event monitor bundled into HookBus Light. Same HTTP server
+Read-only event monitor bundled into HookBus. Same HTTP server
 as the bus (port 18800 by default). Routes:
 
     GET /                -> HTML dashboard (single-page, polls /api/*)
@@ -38,7 +38,7 @@ def _empty_counts() -> Dict[str, int]:
 
 
 class DashboardState:
-    """In-memory event + stats state for the Light dashboard."""
+    """In-memory event + stats state for the dashboard."""
 
     def __init__(self) -> None:
         self._events: "collections.deque[dict]" = collections.deque(maxlen=_RING_SIZE)
@@ -171,7 +171,7 @@ class DashboardState:
 
 
 def register_dashboard_routes(app: aiohttp.web.Application, bus) -> None:
-    """Attach Light dashboard routes to an existing aiohttp app."""
+    """Attach dashboard routes to an existing aiohttp app."""
 
     state = bus.dashboard
 
@@ -227,7 +227,7 @@ HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HookBus Light</title>
+<title>HookBus</title>
 <style>
 :root{--bg:#f6f7f9;--panel:#fff;--ink:#15191f;--muted:#68707d;--line:#d8dde5;--soft:#eef1f5;
 --green:#18864b;--red:#c62828;--amber:#b77905;--blue:#1f5eff;--mono:'SF Mono',Menlo,Consolas,monospace}
@@ -254,8 +254,8 @@ table{width:100%;border-collapse:collapse;font-size:13px}th{background:#2b3036;c
 </head>
 <body>
 <div class="top">
-  <div class="brand">HookBus Light</div>
-  <div class="pill"><span><i class="dot"></i>Bus online</span><span>Profile: <b>Light</b></span><span>Endpoint: <b class="mono" id="endpoint">localhost:18800</b></span><button id="copy-endpoint">Copy</button></div>
+  <div class="brand">HookBus</div>
+  <div class="pill"><span><i class="dot"></i>Bus online</span><span>Endpoint: <b class="mono" id="endpoint">localhost:18800</b></span><button id="copy-endpoint">Copy</button></div>
   <div class="links"><a href="https://agenticthinking.uk" target="_blank" rel="noopener">agenticthinking.uk</a><a href="https://github.com/agentic-thinking/hookbus" target="_blank" rel="noopener">GitHub</a><a href="https://github.com/agentic-thinking/cre-agentprotect" target="_blank" rel="noopener">CRE-AgentProtect</a></div>
 </div>
 <div class="metrics">

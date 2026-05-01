@@ -1,6 +1,6 @@
 # HookBus Light. The open-source runtime governance layer for autonomous AI agents.
 #
-# Starts HookBus on :18800 (bus + Light dashboard) with CRE-AgentProtect Light:
+# Starts HookBus on :18800 (bus + dashboard) with CRE-AgentProtect Light:
 #   CRE-AgentProtect (policy enforcement adapter for Microsoft AGT, sync)
 #
 # Optional:
@@ -46,8 +46,6 @@ services:
     profiles:
       - agentspend
     image: ghcr.io/agentic-thinking/hookbus-agentspend:latest
-    ports:
-      - "${AGENTSPEND_PORT:-8883}:8879"
     volumes:
       - hookbus-auth:/root/.hookbus:ro
       - agentspend-data:/root/.agentspend

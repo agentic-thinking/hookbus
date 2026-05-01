@@ -22,7 +22,6 @@ RUNTIME="${RUNTIME:-}"
 NONINTERACTIVE="${NONINTERACTIVE:-0}"
 WITH_AGENTSPEND="${WITH_AGENTSPEND:-0}"
 HOOKBUS_PORT="${HOOKBUS_PORT:-18800}"
-AGENTSPEND_PORT="${AGENTSPEND_PORT:-8883}"
 
 # Parse args (supported after `--` when piped from curl | bash)
 while [[ $# -gt 0 ]]; do
@@ -34,8 +33,6 @@ while [[ $# -gt 0 ]]; do
     --dir=*)          HOOKBUS_DIR="${1#*=}"; shift ;;
     --port)           HOOKBUS_PORT="${2:-}"; shift 2 ;;
     --port=*)         HOOKBUS_PORT="${1#*=}"; shift ;;
-    --agentspend-port) AGENTSPEND_PORT="${2:-}"; shift 2 ;;
-    --agentspend-port=*) AGENTSPEND_PORT="${1#*=}"; shift ;;
     --with-agentspend) WITH_AGENTSPEND=1; shift ;;
     --profile)
       profile="${2:-light}"
@@ -146,7 +143,7 @@ fi
 
 # shellcheck disable=SC1090
 set -a; . "$ENV_FILE"; set +a
-export HOOKBUS_PORT AGENTSPEND_PORT
+export HOOKBUS_PORT
 
 # ----------------------------------------------------------------------------
 # Start the stack

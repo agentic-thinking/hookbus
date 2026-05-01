@@ -39,7 +39,7 @@ curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime skip --noninter
 # Clean side-by-side install when you already have ~/.hookbus or another stack
 curl -fsSL https://hookbus.com/install.sh | bash -s -- --dir ./hookbus-light --port 18810 --runtime claude-code --noninteractive
 
-# Optional cost monitor dashboard as well as AgentProtect
+# Optional cost monitor subscriber as well as AgentProtect
 curl -fsSL https://hookbus.com/install.sh | bash -s -- --with-agentspend
 ```
 
@@ -161,7 +161,7 @@ Full envelope contract: see [`HOOKBUS_SPEC.md`](./HOOKBUS_SPEC.md).
 | Repo | Purpose | Licence |
 |---|---|---|
 | [cre-agentprotect](https://github.com/agentic-thinking/cre-agentprotect) | Policy enforcement via Microsoft Agent Governance Toolkit | MIT |
-| [hookbus-agentspend](https://github.com/agentic-thinking/hookbus-agentspend) | Token + cost tracking with built-in dashboard | MIT |
+| [hookbus-agentspend](https://github.com/agentic-thinking/hookbus-agentspend) | Token + cost tracking surfaced through HookBus events | MIT |
 
 Build your own subscriber in ~30 lines of Python, see [`HOOKBUS_SPEC.md`](./HOOKBUS_SPEC.md) for the envelope contract.
 
@@ -176,7 +176,7 @@ Build your own subscriber in ~30 lines of Python, see [`HOOKBUS_SPEC.md`](./HOOK
 │   Claude,     │ ◀──────────────── │                  │
 │   OpenClaw,   │  consolidated     │  ┌────────────┐  │
 │   OpenAI …)   │  verdict          │  │ Dashboard  │  │
-└───────────────┘                   │  │ (18801)    │  │
+└───────────────┘                   │  │ (18800)    │  │
                                     │  └────────────┘  │
                                     └────┬────────┬────┘
                                          │        │
@@ -214,7 +214,6 @@ subscribers:
     metadata:
       vendor: Agentic Thinking Limited
       licence: MIT
-      ui_port: 8883
 ```
 
 See [`hookbus.yaml`](./hookbus.yaml) for the complete configuration reference.
@@ -290,7 +289,7 @@ docker compose up -d --build
 
 ## Security
 
-HookBus generates a random authentication token on first start and requires it on **every** request to the bus and subscriber dashboards/APIs. All data, events, token costs, AGT categories, session IDs, subscriber names, is protected. Unauthorised requests get `401 Unauthorized`.
+HookBus generates a random authentication token on first start and requires it on **every** request to the bus dashboard, event API, and subscriber APIs. All data, events, token costs, AGT categories, session IDs, subscriber names, is protected. Unauthorised requests get `401 Unauthorized`.
 
 ### Read your token (one-time after install)
 
@@ -300,13 +299,12 @@ docker compose exec -T hookbus cat /root/.hookbus/.token
 
 Copy the value. Examples below use `$TOKEN` to mean that string.
 
-### Open a dashboard
+### Open the dashboard
 
-Paste the full URL with the token once per dashboard:
+Paste the full URL with the token once:
 
 ```
-http://localhost:18800/?token=<your-token>     # HookBus bus + Light dashboard
-http://localhost:8883/?token=<your-token>      # HookBus-AgentSpend dashboard, if enabled
+http://localhost:18800/?token=<your-token>     # HookBus bus + dashboard
 ```
 
 The first load sets an HTTP-only cookie scoped to that host:port. Subsequent navigation in the same tab keeps you authenticated without the query param.
