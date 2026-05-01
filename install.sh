@@ -325,14 +325,15 @@ esac
 # ----------------------------------------------------------------------------
 cat <<DONE
 
-${C_G}${C_BOLD}HookBus Light is running.${C_RESET}
+${C_G}${C_BOLD}HookBus is running.${C_RESET}
 
-  ${C_BOLD}Dashboard:${C_RESET}  $DASH_URL
+  ${C_BOLD}Bus API:${C_RESET}   $BUS_BASE
   ${C_BOLD}Token:${C_RESET}      saved in $ENV_FILE (chmod 600)
   ${C_BOLD}Compose:${C_RESET}    cd $HOOKBUS_DIR && docker compose ps
   ${C_BOLD}Stop:${C_RESET}       cd $HOOKBUS_DIR && docker compose down
   ${C_BOLD}Docs:${C_RESET}       https://github.com/agentic-thinking/hookbus
   ${C_BOLD}Profile:${C_RESET}    HookBus + CRE-AgentProtect Light$([[ "$WITH_AGENTSPEND" = "1" ]] && printf " + AgentSpend")
+  ${C_BOLD}Dashboard:${C_RESET}  Enterprise UI: https://github.com/agentic-thinking/hookbus-dashboard-enterprise
 
 Install another publisher against this bus:
   set -a

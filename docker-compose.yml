@@ -1,6 +1,6 @@
 # HookBus Light. The open-source runtime governance layer for autonomous AI agents.
 #
-# Starts HookBus on :18800 (bus + dashboard) with CRE-AgentProtect Light:
+# Starts HookBus on :18800 (bus API) with CRE-AgentProtect Light:
 #   CRE-AgentProtect (policy enforcement adapter for Microsoft AGT, sync)
 #
 # Optional:
@@ -9,7 +9,7 @@
 # Quick start:
 #   docker compose up -d
 #   TOKEN=$(docker compose exec -T hookbus cat /root/.hookbus/.token)
-#   echo "Dashboard: http://localhost:18800/?token=$TOKEN"
+#   curl -H "Authorization: Bearer $TOKEN" http://localhost:18800/healthz
 #
 # The bus generates a bearer token on first boot and writes it to the shared
 # named volume `hookbus-auth`. The subscribers mount the same volume read-only
@@ -24,7 +24,7 @@ services:
       # Pin the bearer token so it survives container restarts.
       # Generate once: HOOKBUS_TOKEN=$(openssl rand -base64 32) docker compose up -d
       # If unset, the bus regenerates a fresh token on every start and ALL
-      # consumers (publishers, dashboards, systemd drop-ins) will 401 until
+      # consumers (publishers, external dashboards, systemd drop-ins) will 401 until
       # they are re-synced. Always pin this in production.
       HOOKBUS_TOKEN: "${HOOKBUS_TOKEN:-}"
     volumes:

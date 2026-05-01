@@ -43,7 +43,7 @@ curl -fsSL https://hookbus.com/install.sh | bash -s -- --dir ./hookbus-light --p
 curl -fsSL https://hookbus.com/install.sh | bash -s -- --with-agentspend
 ```
 
-The script prints the dashboard URL + bearer token on completion. Re-run any time, it is idempotent.
+The script prints the bus API URL + bearer token on completion. Re-run any time, it is idempotent.
 
 _Prefer not to pipe curl to bash? Inspect first:_ `curl -fsSL https://hookbus.com/install.sh > install.sh && less install.sh && bash install.sh`
 
@@ -71,8 +71,8 @@ cd hookbus
 export HOOKBUS_TOKEN=$(openssl rand -base64 32 | tr -d '/+=')
 docker compose up -d
 
-# 3. Open the dashboard
-echo "Dashboard: http://localhost:18800/?token=$HOOKBUS_TOKEN"
+# 3. Check the bus API
+curl -H "Authorization: Bearer $HOOKBUS_TOKEN" http://localhost:18800/healthz
 ```
 
 That pulls `ghcr.io/agentic-thinking/hookbus:latest` and `cre-agentprotect:latest`, starts the bus + AgentProtect Light, and wires bearer-token auth across the stack. To add AgentSpend, run `COMPOSE_PROFILES=agentspend docker compose up -d`.
@@ -175,9 +175,8 @@ Build your own subscriber in ~30 lines of Python, see [`HOOKBUS_SPEC.md`](./HOOK
 │   (Hermes,    │                   │  (port 18800)    │
 │   Claude,     │ ◀──────────────── │                  │
 │   OpenClaw,   │  consolidated     │  ┌────────────┐  │
-│   OpenAI …)   │  verdict          │  │ Dashboard  │  │
-└───────────────┘                   │  │ (18800)    │  │
-                                    │  └────────────┘  │
+│   OpenAI …)   │  verdict          │                  │
+└───────────────┘                   │  JSON API only   │
                                     └────┬────────┬────┘
                                          │        │
                        ┌─────────────────┘        └─────────────────┐
@@ -289,7 +288,7 @@ docker compose up -d --build
 
 ## Security
 
-HookBus generates a random authentication token on first start and requires it on **every** request to the bus dashboard, event API, and subscriber APIs. All data, events, token costs, AGT categories, session IDs, subscriber names, is protected. Unauthorised requests get `401 Unauthorized`.
+HookBus generates a random authentication token on first start and requires it on **every** request to the bus event API and subscriber APIs. All data, events, token costs, AGT categories, session IDs, subscriber names, is protected. Unauthorised requests get `401 Unauthorized`.
 
 ### Read your token (one-time after install)
 
@@ -299,15 +298,16 @@ docker compose exec -T hookbus cat /root/.hookbus/.token
 
 Copy the value. Examples below use `$TOKEN` to mean that string.
 
-### Open the dashboard
+### Check the bus API
 
-Paste the full URL with the token once:
+Use the bearer token when calling HookBus:
 
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://localhost:18800/healthz
+curl -H "Authorization: Bearer $TOKEN" http://localhost:18800/api/events
 ```
-http://localhost:18800/?token=<your-token>     # HookBus bus + dashboard
-```
 
-The first load sets an HTTP-only cookie scoped to that host:port. Subsequent navigation in the same tab keeps you authenticated without the query param.
+HookBus does not ship a bundled HTML dashboard. Use the separate Enterprise Dashboard repo if you need the operator UI: https://github.com/agentic-thinking/hookbus-dashboard-enterprise
 
 ### Publishers authenticate via header
 
@@ -347,7 +347,7 @@ Publishers can also send optional identity metadata such as `publisher_id`, `use
 
 ### Network binding
 
-By default, ports bind to `0.0.0.0` so LAN hosts can reach the dashboards, auth still enforces per-request. For stricter deployments, bind to `127.0.0.1` in `docker-compose.yml` and front with a reverse proxy (Caddy, nginx, Traefik) that handles TLS + auth at the edge.
+By default, ports bind to `0.0.0.0` so LAN hosts can reach the bus API, auth still enforces per-request. For stricter deployments, bind to `127.0.0.1` in `docker-compose.yml` and front with a reverse proxy (Caddy, nginx, Traefik) that handles TLS + auth at the edge.
 
 ### Disable auth (local dev only)
 

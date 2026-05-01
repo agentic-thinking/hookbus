@@ -25,7 +25,7 @@ import aiohttp
 import aiohttp.web
 
 from .licence import load_licence, banner
-from .dashboard import DashboardState, register_dashboard_routes
+from .api_state import BusState, register_api_routes
 import secrets
 
 # HookBus authentication token.
@@ -249,7 +249,7 @@ async def _auth_middleware(request, handler):
         if pub_id is not None:
             request['publisher_id'] = pub_id
             return await handler(request)
-    # Accept ?token=... for dashboard bookmark UX, then set a cookie
+    # Accept ?token=... for browser/API clients, then set a cookie.
     q_tok = request.query.get('token', '')
     if q_tok:
         pub_id = _resolve_publisher(q_tok)
@@ -380,8 +380,8 @@ class Bus:
         self.config_path = config_path
         self.bus_address = bus_address
         self.fail_open = fail_open
-        # Dashboard state, populated in route_event after each decision
-        self.dashboard = DashboardState()
+        # In-memory API state, populated in route_event after each decision.
+        self.state = BusState()
         # Auth token for forwarding events to subscribers (shared token model)
         self._bus_token = _load_or_generate_token()
         # HookBus tier + licence (Light vs Enterprise)
@@ -648,7 +648,7 @@ class Bus:
         matching = self._get_matching_subscribers(event)
         if not matching:
             logger.debug(f"No subscribers for event type: {event.event_type}")
-            self.dashboard.record_event(event, Decision.ALLOW, "No subscribers matched", responses=[], latency_ms=(time.time()-_t0)*1000.0)
+            self.state.record_event(event, Decision.ALLOW, "No subscribers matched", responses=[], latency_ms=(time.time()-_t0)*1000.0)
             return Decision.ALLOW, "No subscribers matched"
         
         logger.info(
@@ -708,7 +708,7 @@ class Bus:
             except asyncio.TimeoutError:
                 logger.warning("Sync subscriber timeout")
                 if not self.fail_open:
-                    self.dashboard.record_event(event, Decision.DENY, "Timeout exceeded", responses=responses, latency_ms=(time.time()-_t0)*1000.0)
+                    self.state.record_event(event, Decision.DENY, "Timeout exceeded", responses=responses, latency_ms=(time.time()-_t0)*1000.0)
                     return Decision.DENY, "Timeout exceeded"
         
         # Fan out to async subscribers without waiting
@@ -719,7 +719,7 @@ class Bus:
         
         # Consolidate decisions
         decision, reason = consolidate_decisions(responses)
-        self.dashboard.record_event(event, decision, reason, responses=responses, latency_ms=(time.time()-_t0)*1000.0)
+        self.state.record_event(event, decision, reason, responses=responses, latency_ms=(time.time()-_t0)*1000.0)
         return decision, reason
 
     async def handle_http_request(
@@ -821,7 +821,7 @@ class Bus:
             )
 
     async def start_server(self, host: str = "0.0.0.0", port: int = 18800) -> None:
-        """Start the HookBus HTTP server, print the boot banner, bind the /event endpoint and dashboard routes, and install SIGHUP hot-reload."""
+        """Start the HookBus HTTP server, bind /event and JSON API routes, and install SIGHUP hot-reload."""
         # HookBus startup banner, tier + patent + licence
         print(banner(self.licence, "1.0.0"), flush=True)
         """Start the HTTP server for receiving events."""
@@ -865,9 +865,9 @@ class Bus:
 
         app.router.add_get("/healthz", healthz)
         app.router.add_post("/event", self.handle_http_request)
-        # Register HookBus dashboard routes (GET /, /api/stats, /api/events,
+        # Register JSON API routes (GET /api/stats, /api/events,
         # /api/subscribers, /api/publishers) on the same aiohttp app.
-        register_dashboard_routes(app, self)
+        register_api_routes(app, self)
         
         runner = aiohttp.web.AppRunner(app)
         await runner.setup()
