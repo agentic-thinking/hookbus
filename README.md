@@ -104,11 +104,11 @@ Then install the shim for your runtime:
 |---|---|---|
 | Claude Code | `curl -fsSL https://hookbus.com/publishers/claude-code \| bash` | MIT |
 | Codex CLI | `curl -fsSL https://hookbus.com/publishers/codex \| bash` | MIT |
-| Nous Research Hermes | `pip install hookbus-publisher-hermes` | MIT |
-| OpenAI Agents SDK | `pip install hookbus-publisher-openai` | MIT |
-| Anthropic Claude Agent SDK | `pip install hookbus-publisher-anthropic` | MIT |
-| Sourcegraph Amp | `pip install hookbus-publisher-amp` | MIT |
-| OpenClaw | `npm install @agentic-thinking/hookbus-publisher-openclaw` | MIT |
+| Nous Research Hermes | `git clone https://github.com/agentic-thinking/hookbus-publisher-hermes && cd hookbus-publisher-hermes && ./install.sh` | MIT |
+| OpenAI Agents SDK | planned publisher | MIT |
+| Anthropic Claude Agent SDK | planned publisher | MIT |
+| Sourcegraph Amp | `git clone https://github.com/agentic-thinking/hookbus-publisher-amp && cd hookbus-publisher-amp && ./install.sh` | MIT |
+| OpenClaw | `git clone https://github.com/agentic-thinking/hookbus-publisher-openclaw && cd hookbus-publisher-openclaw && ./install.sh` | MIT |
 
 If `HOOKBUS_TOKEN` is not exported before running a publisher installer, the installer can still complete but an authenticated bus will reject runtime events. Verify after install:
 

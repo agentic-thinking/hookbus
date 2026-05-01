@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# HookBus Light one-shot installer.
+# HookBus one-shot installer.
 # Usage:
 #   curl -fsSL https://hookbus.com/install.sh | bash
 #   curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime claude-code
@@ -77,7 +77,7 @@ die()  { printf "%sx %s%s\n" "$C_R" "$*" "$C_RESET" >&2; exit 1; }
 # ----------------------------------------------------------------------------
 cat <<BANNER
 
-${C_BOLD}HookBus Light installer${C_RESET}
+${C_BOLD}HookBus installer${C_RESET}
 Open-source event bus for AI agent lifecycle governance.
 Apache 2.0 bus. CRE-AgentProtect Light adapter. Docker-based, 15 seconds to first event.
 Docs: https://github.com/agentic-thinking/hookbus
