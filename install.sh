@@ -354,24 +354,26 @@ select_runtime
 # ----------------------------------------------------------------------------
 install_hermes() {
   say "Installing Hermes publisher..."
-  local PIP
-  PIP=$(command -v pip3 || command -v pip || true)
-  if [[ -z "$PIP" ]]; then
-    warn "Python pip not found. Install python3-pip and re-run with --runtime hermes."
-    return 1
-  fi
-  $PIP install --quiet --upgrade "git+https://github.com/agentic-thinking/hookbus-publisher-hermes.git" || {
-    warn "pip install failed. You can try: $PIP install --user git+https://github.com/agentic-thinking/hookbus-publisher-hermes.git"
-    return 1
+
+  local TMP_DIR
+  TMP_DIR=$(mktemp -d)
+
+  git clone --quiet --depth 1 https://github.com/agentic-thinking/hookbus-publisher-hermes.git "$TMP_DIR/src" || {
+    warn "clone failed"; rm -rf "$TMP_DIR"; return 1
   }
+
+  (cd "$TMP_DIR/src" && HOOKBUS_URL="$BUS_BASE/event" HOOKBUS_TOKEN="$HOOKBUS_TOKEN" HOOKBUS_FAIL_MODE=open bash install.sh 2>&1 | tail -24) || {
+    warn "Hermes publisher install had issues"; rm -rf "$TMP_DIR"; return 1
+  }
+  rm -rf "$TMP_DIR"
+
   ok "Hermes publisher installed."
   cat <<HINT
-  Next: pin these env vars before starting hermes-agent
-    export HOOKBUS_URL=$BUS_BASE/event
-    export HOOKBUS_TOKEN=$HOOKBUS_TOKEN
-  (HOOKBUS_SOURCE defaults to "hermes-agent" inside the publisher;
-   do NOT export HOOKBUS_SOURCE in your shell profile, it will leak
-   into other publishers on the same host.)
+  Next: restart Hermes and run:
+    hermes chat --tui
+
+  The publisher installer writes HookBus settings to:
+    $HOME/hermes-agent/.env
 HINT
 }
 
@@ -483,35 +485,25 @@ install_openclaw() {
     return 1
   fi
 
-  local OC_EXT="$HOME/.openclaw/extensions"
   local TMP_DIR
   TMP_DIR=$(mktemp -d)
 
-  git clone --quiet https://github.com/agentic-thinking/hookbus-publisher-openclaw.git "$TMP_DIR/src" || {
+  git clone --quiet --depth 1 https://github.com/agentic-thinking/hookbus-publisher-openclaw.git "$TMP_DIR/src" || {
     warn "clone failed"; rm -rf "$TMP_DIR"; return 1
   }
 
-  # Plugin id must match target dir name. Read from plugin manifest.
-  local PID
-  PID=$(python3 -c "import json; print(json.load(open('$TMP_DIR/src/openclaw.plugin.json'))['id'])" 2>/dev/null || echo cre)
-  mkdir -p "$OC_EXT/$PID"
-  cp -r "$TMP_DIR/src/"* "$OC_EXT/$PID/"
+  (cd "$TMP_DIR/src" && HOOKBUS_URL="$BUS_BASE/event" HOOKBUS_TOKEN="$HOOKBUS_TOKEN" HOOKBUS_FAIL_MODE=closed HOOKBUS_SOURCE=openclaw bash install.sh 2>&1 | tail -24) || {
+    warn "OpenClaw publisher install had issues"; rm -rf "$TMP_DIR"; return 1
+  }
   rm -rf "$TMP_DIR"
 
-  (cd "$OC_EXT/$PID" && npm install --omit=dev --silent 2>&1 | tail -3) || warn "npm install had warnings"
-
-  ok "OpenClaw plugin installed at $OC_EXT/$PID"
+  ok "OpenClaw publisher installed."
   cat <<HINT
-  Next: pin these env vars into the openclaw-gateway systemd drop-in
-  (~/.config/systemd/user/openclaw-gateway.service.d/hookbus.conf):
+  Next: launch OpenClaw normally:
+    openclaw tui
 
-    [Service]
-    Environment="HOOKBUS_URL=$BUS_BASE/event"
-    Environment="HOOKBUS_TOKEN=$HOOKBUS_TOKEN"
-    Environment="HOOKBUS_FAIL_MODE=closed"
-    Environment="HOOKBUS_SOURCE=openclaw"
-
-  Then: systemctl --user daemon-reload && systemctl --user restart openclaw-gateway
+  The publisher installer writes plugin config to:
+    $HOME/.openclaw/extensions/cre/hookbus.env
 HINT
 }
 
