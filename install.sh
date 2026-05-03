@@ -27,7 +27,7 @@ WITH_AGENTSPEND="${WITH_AGENTSPEND:-0}"
 HOOKBUS_PORT="${HOOKBUS_PORT:-18800}"
 AGENTSPEND_PORT="${AGENTSPEND_PORT:-8883}"
 ACTION="${ACTION:-}"
-SEND_DEMO_EVENTS="${SEND_DEMO_EVENTS:-0}"
+SEND_TEST_EVENT="${SEND_TEST_EVENT:-0}"
 SKIP_STACK="${SKIP_STACK:-0}"
 
 # Parse args (supported after `--` when piped from curl | bash)
@@ -37,8 +37,7 @@ while [[ $# -gt 0 ]]; do
     --runtime=*)      RUNTIME="${1#*=}"; shift ;;
     --action)         ACTION="${2:-}"; shift 2 ;;
     --action=*)       ACTION="${1#*=}"; shift ;;
-    --demo|--cto-demo) ACTION="install"; SEND_DEMO_EVENTS=1; [[ -z "$RUNTIME" ]] && RUNTIME="skip"; shift ;;
-    --send-demo-events) SEND_DEMO_EVENTS=1; shift ;;
+    --send-test-event) SEND_TEST_EVENT=1; shift ;;
     --doctor)         ACTION="doctor"; shift ;;
     --publisher-only) ACTION="publisher"; SKIP_STACK=1; shift ;;
     --noninteractive) NONINTERACTIVE=1; shift ;;
@@ -110,24 +109,22 @@ main_menu() {
   cat > /dev/tty <<MENU
 
 ${C_BOLD}HookBus Setup${C_RESET}
-  1) Quick CTO demo - install bus, CRE-AgentProtect Light, and sample events
-  2) Install HookBus + CRE-AgentProtect Light
-  3) Add publisher to existing HookBus
-  4) Run doctor
-  5) Send demo events to existing HookBus
-  6) Exit
+  1) Install HookBus + CRE-AgentProtect Light
+  2) Add publisher to existing HookBus
+  3) Run doctor
+  4) Send safe test event to existing HookBus
+  5) Exit
 
 MENU
   local choice
   choice=$(ask_tty "Choice" "1")
   case "$choice" in
-    1) ACTION="install"; SEND_DEMO_EVENTS=1; [[ -z "$RUNTIME" ]] && RUNTIME="skip" ;;
-    2) ACTION="install" ;;
-    3) ACTION="publisher"; SKIP_STACK=1 ;;
-    4) ACTION="doctor" ;;
-    5) ACTION="demo-events" ;;
-    6) exit 0 ;;
-    *) warn "Unknown choice '$choice', using Quick CTO demo."; ACTION="install"; SEND_DEMO_EVENTS=1; [[ -z "$RUNTIME" ]] && RUNTIME="skip" ;;
+    1) ACTION="install" ;;
+    2) ACTION="publisher"; SKIP_STACK=1 ;;
+    3) ACTION="doctor" ;;
+    4) ACTION="test-event" ;;
+    5) exit 0 ;;
+    *) warn "Unknown choice '$choice', using install."; ACTION="install" ;;
   esac
 }
 
@@ -174,28 +171,20 @@ load_existing_context() {
   # shellcheck disable=SC1090
   set -a; . "$ENV_FILE"; set +a
   BUS_BASE="http://localhost:${HOOKBUS_PORT}"
-  DASH_URL="$BUS_BASE/?token=${HOOKBUS_TOKEN}"
+  BUS_URL="$BUS_BASE/?token=${HOOKBUS_TOKEN}"
 }
 
-send_demo_events() {
-  say "Sending demo events to $BUS_BASE..."
+send_test_event() {
+  say "Sending safe smoke event to $BUS_BASE..."
   local ts
-  local demo_id
+  local event_id
   ts=$(date -Iseconds)
-  demo_id="demo-$(date +%s)"
+  event_id="smoke-$(date +%s)"
   curl -s -H "Authorization: Bearer $HOOKBUS_TOKEN" \
        -H "Content-Type: application/json" \
-       -d '{"event_id":"'"$demo_id"'-session-start","event_type":"SessionStart","timestamp":"'"$ts"'","source":"hookbus-demo","session_id":"cto-demo","tool_name":"","tool_input":{},"metadata":{"demo":true,"scenario":"cto_quick_demo"}}' \
-       "$BUS_BASE/event" >/dev/null || warn "SessionStart demo event failed"
-  curl -s -H "Authorization: Bearer $HOOKBUS_TOKEN" \
-       -H "Content-Type: application/json" \
-       -d '{"event_id":"'"$demo_id"'-prompt","event_type":"UserPromptSubmit","timestamp":"'"$ts"'","source":"hookbus-demo","session_id":"cto-demo","tool_name":"","tool_input":{},"metadata":{"prompt":"Deploy the agent and show me what would be routed to policy subscribers.","demo":true}}' \
-       "$BUS_BASE/event" >/dev/null || warn "UserPromptSubmit demo event failed"
-  curl -s -H "Authorization: Bearer $HOOKBUS_TOKEN" \
-       -H "Content-Type: application/json" \
-       -d '{"event_id":"'"$demo_id"'-pretool","event_type":"PreToolUse","timestamp":"'"$ts"'","source":"hookbus-demo","session_id":"cto-demo","tool_name":"bash","tool_input":{"command":"rm -rf /production/customer-data"},"metadata":{"demo":true,"scenario":"dangerous_tool_call","expected":"policy subscriber can deny before execution"}}' \
-       "$BUS_BASE/event" >/dev/null || warn "PreToolUse demo event failed"
-  ok "Demo events sent. Open: $DASH_URL"
+       -d '{"event_id":"'"$event_id"'","event_type":"PreToolUse","timestamp":"'"$ts"'","source":"hookbus-installer","session_id":"smoke","tool_name":"bash","tool_input":{"command":"echo hookbus-smoke-test"},"metadata":{"smoke_test":true}}' \
+       "$BUS_BASE/event" >/dev/null || warn "safe smoke event failed"
+  ok "Safe smoke event sent. API: $BUS_URL"
 }
 
 run_doctor() {
@@ -216,7 +205,7 @@ DOCTOR
     root_status=$(curl -s -o /dev/null -w "%{http_code}" "$BUS_BASE/" 2>/dev/null || true)
     if curl -sf -o /dev/null "$BUS_BASE/healthz" 2>/dev/null || [[ "$root_status" =~ ^(200|401)$ ]]; then
       ok "bus responding: $BUS_BASE"
-      ok "dashboard: $DASH_URL"
+      ok "bus API: $BUS_URL"
     else
       warn "bus not responding on $BUS_BASE"
     fi
@@ -248,9 +237,9 @@ if [[ "$ACTION" = "doctor" ]]; then
   exit 0
 fi
 
-if [[ "$ACTION" = "demo-events" ]]; then
+if [[ "$ACTION" = "test-event" ]]; then
   load_existing_context
-  send_demo_events
+  send_test_event
   exit 0
 fi
 
@@ -333,9 +322,11 @@ export HOOKBUS_PORT AGENTSPEND_PORT
 # ----------------------------------------------------------------------------
 if [[ "$WITH_AGENTSPEND" = "1" ]]; then
   say "Starting HookBus + CRE-AgentProtect Light + AgentSpend..."
+  HOOKBUS_SUBSCRIBERS_FILE=./subscribers.with-agentspend.yaml COMPOSE_PROFILES=agentspend docker compose pull hookbus cre-agentprotect agentspend 2>&1 | tail -10 || warn "docker compose pull had issues; using local images"
   HOOKBUS_SUBSCRIBERS_FILE=./subscribers.with-agentspend.yaml COMPOSE_PROFILES=agentspend docker compose up -d 2>&1 | tail -10 || die "docker compose failed"
 else
   say "Starting HookBus + CRE-AgentProtect Light..."
+  docker compose pull hookbus cre-agentprotect 2>&1 | tail -10 || warn "docker compose pull had issues; using local images"
   docker compose up -d hookbus cre-agentprotect 2>&1 | tail -10 || die "docker compose failed"
 fi
 
@@ -349,7 +340,7 @@ else
   warn "Bus not yet responding, may take a few more seconds on first boot."
 fi
 
-DASH_URL="$BUS_BASE/?token=${HOOKBUS_TOKEN}"
+BUS_URL="$BUS_BASE/?token=${HOOKBUS_TOKEN}"
 
 fi
 
@@ -535,8 +526,8 @@ case "$RUNTIME" in
   *)           warn "Unsupported runtime '$RUNTIME'. Accepted: claude-code, codex, amp, opencode, hermes, openclaw, skip." ;;
 esac
 
-if [[ "$SEND_DEMO_EVENTS" = "1" ]]; then
-  send_demo_events
+if [[ "$SEND_TEST_EVENT" = "1" ]]; then
+  send_test_event
 fi
 
 # ----------------------------------------------------------------------------
@@ -546,7 +537,7 @@ cat <<DONE
 
 ${C_G}${C_BOLD}HookBus Light is running.${C_RESET}
 
-  ${C_BOLD}Dashboard:${C_RESET}  $DASH_URL
+  ${C_BOLD}Bus API:${C_RESET}   $BUS_URL
   ${C_BOLD}Token:${C_RESET}      saved in $ENV_FILE (chmod 600)
   ${C_BOLD}Compose:${C_RESET}    cd $HOOKBUS_DIR && docker compose ps
   ${C_BOLD}Stop:${C_RESET}       cd $HOOKBUS_DIR && docker compose down

@@ -834,7 +834,7 @@ class Bus:
         logger.info('=' * 60)
         logger.info('  HookBus authentication required on every request.')
         logger.info('  Read the token:  docker exec hookbus cat %s', _TOKEN_PATH)
-        logger.info('  Then open:       http://%s:%s/?token=<paste>', host if host != '0.0.0.0' else 'localhost', port)
+        logger.info('  Bus API:         http://%s:%s/?token=<paste>', host if host != '0.0.0.0' else 'localhost', port)
         logger.info('  Publishers use:  Authorization: Bearer <token>')
         logger.info('  Pin in production: set HOOKBUS_TOKEN env before first boot.')
         logger.info('=' * 60)
@@ -863,6 +863,22 @@ class Bus:
                 "subscribers": len(self._subscribers),
             })
 
+        async def index(_request: aiohttp.web.Request) -> aiohttp.web.Response:
+            return aiohttp.web.json_response({
+                "service": "hookbus",
+                "status": "ok",
+                "ui": "not_bundled",
+                "endpoints": {
+                    "health": "/healthz",
+                    "event": "/event",
+                    "stats": "/api/stats",
+                    "events": "/api/events",
+                    "subscribers": "/api/subscribers",
+                    "publishers": "/api/publishers",
+                },
+            })
+
+        app.router.add_get("/", index)
         app.router.add_get("/healthz", healthz)
         app.router.add_post("/event", self.handle_http_request)
         # Register JSON API routes (GET /api/stats, /api/events,

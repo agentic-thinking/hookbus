@@ -12,7 +12,7 @@
 
 ## Install (60 seconds)
 
-One shell command opens a terminal UI, then clones the bus, pulls HookBus + CRE-AgentProtect Light as public Docker images, bootstraps a bearer token, and starts the stack. The guided path can run a CTO demo, add a publisher, run diagnostics, or send sample events. CRE-AgentProtect Light is a policy enforcement adapter for Microsoft AGT.
+One shell command opens a terminal UI, then clones the bus, pulls HookBus + CRE-AgentProtect Light as public Docker images, bootstraps a bearer token, and starts the stack. The guided path can install the bus, add a publisher, run diagnostics, or send one safe smoke event. CRE-AgentProtect Light is a policy enforcement adapter for Microsoft AGT.
 
 ```bash
 curl -fsSL https://hookbus.com/install.sh | bash
@@ -21,9 +21,6 @@ curl -fsSL https://hookbus.com/install.sh | bash
 Non-interactive variants:
 
 ```bash
-# Quick CTO demo with sample events
-curl -fsSL https://hookbus.com/install.sh | bash -s -- --demo
-
 # Claude Code users
 curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime claude-code
 
@@ -51,14 +48,17 @@ curl -fsSL https://hookbus.com/install.sh | bash -s -- --publisher-only --runtim
 # Check local install health
 curl -fsSL https://hookbus.com/install.sh | bash -s -- --doctor
 
+# Send one safe smoke event to an existing install
+curl -fsSL https://hookbus.com/install.sh | bash -s -- --action test-event
+
 # Clean side-by-side install when you already have ~/.hookbus or another stack
 curl -fsSL https://hookbus.com/install.sh | bash -s -- --dir ./hookbus-light --port 18810 --runtime claude-code --noninteractive
 
-# Optional cost monitor dashboard as well as AgentProtect
+# Optional cost monitor as well as AgentProtect
 curl -fsSL https://hookbus.com/install.sh | bash -s -- --with-agentspend
 ```
 
-The script prints the dashboard URL + bearer token on completion. Re-run any time, it is idempotent.
+The script prints the bus API URL + bearer token location on completion. Re-run any time, it is idempotent.
 
 _Prefer not to pipe curl to bash? Inspect first:_ `curl -fsSL https://hookbus.com/install.sh > install.sh && less install.sh && bash install.sh`
 
@@ -86,15 +86,15 @@ cd hookbus
 export HOOKBUS_TOKEN=$(openssl rand -base64 32 | tr -d '/+=')
 docker compose up -d
 
-# 3. Open the dashboard
-echo "Dashboard: http://localhost:18800/?token=$HOOKBUS_TOKEN"
+# 3. Check the bus API
+curl -H "Authorization: Bearer $HOOKBUS_TOKEN" http://localhost:18800/healthz
 ```
 
 That pulls `ghcr.io/agentic-thinking/hookbus:latest` and `cre-agentprotect:latest`, starts the bus + AgentProtect Light, and wires bearer-token auth across the stack. To add AgentSpend, run `COMPOSE_PROFILES=agentspend docker compose up -d`.
 
 **Want to build from source instead?** Clone the public repos side-by-side (`hookbus`, `cre-agentprotect`, and optionally `hookbus-agentspend`) then `docker build -t ghcr.io/agentic-thinking/<name>:latest .` in each before `docker compose up -d`.
 
-Open the link printed above in your browser. The token sets an auth cookie; refresh + navigation in that tab stays authenticated without re-passing it.
+Open `http://localhost:18800/?token=$HOOKBUS_TOKEN` in your browser to confirm the bus is alive and view the API links.
 
 That brings up **HookBus™** + **CRE-AgentProtect Light** (Microsoft AGT policy adapter), talking via the Compose network. Auth is on by default, see the [Security](#security) section below for pinning your own token, reverse-proxy recipes, and production hardening.
 
@@ -298,7 +298,7 @@ docker compose up -d --build
 
 ## Security
 
-HookBus generates a random authentication token on first start and requires it on **every** request to the bus and subscriber dashboards/APIs. All data, events, token costs, AGT categories, session IDs, subscriber names, is protected. Unauthorised requests get `401 Unauthorized`.
+HookBus generates a random authentication token on first start and requires it on **every** request to the bus and subscriber APIs. All data, events, token costs, AGT categories, session IDs, subscriber names, is protected. Unauthorised requests get `401 Unauthorized`.
 
 ### Read your token (one-time after install)
 
@@ -308,12 +308,12 @@ docker compose exec -T hookbus cat /root/.hookbus/.token
 
 Copy the value. Examples below use `$TOKEN` to mean that string.
 
-### Open a dashboard
+### Open the bus API
 
-Paste the full URL with the token once per dashboard:
+Paste the full URL with the token once:
 
 ```
-http://localhost:18800/?token=<your-token>     # HookBus bus + Light dashboard
+http://localhost:18800/?token=<your-token>     # HookBus bus API links
 http://localhost:8883/?token=<your-token>      # HookBus-AgentSpend dashboard, if enabled
 ```
 
@@ -355,7 +355,7 @@ services:
 
 ### Network binding
 
-By default, ports bind to `0.0.0.0` so LAN hosts can reach the dashboards, auth still enforces per-request. For stricter deployments, bind to `127.0.0.1` in `docker-compose.yml` and front with a reverse proxy (Caddy, nginx, Traefik) that handles TLS + auth at the edge.
+By default, ports bind to `0.0.0.0` so LAN hosts can reach the APIs, auth still enforces per-request. For stricter deployments, bind to `127.0.0.1` in `docker-compose.yml` and front with a reverse proxy (Caddy, nginx, Traefik) that handles TLS + auth at the edge.
 
 ### Disable auth (local dev only)
 
