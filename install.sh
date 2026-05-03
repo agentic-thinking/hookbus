@@ -26,12 +26,21 @@ NONINTERACTIVE="${NONINTERACTIVE:-0}"
 WITH_AGENTSPEND="${WITH_AGENTSPEND:-0}"
 HOOKBUS_PORT="${HOOKBUS_PORT:-18800}"
 AGENTSPEND_PORT="${AGENTSPEND_PORT:-8883}"
+ACTION="${ACTION:-}"
+SEND_DEMO_EVENTS="${SEND_DEMO_EVENTS:-0}"
+SKIP_STACK="${SKIP_STACK:-0}"
 
 # Parse args (supported after `--` when piped from curl | bash)
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --runtime)        RUNTIME="${2:-}"; shift 2 ;;
     --runtime=*)      RUNTIME="${1#*=}"; shift ;;
+    --action)         ACTION="${2:-}"; shift 2 ;;
+    --action=*)       ACTION="${1#*=}"; shift ;;
+    --demo|--cto-demo) ACTION="install"; SEND_DEMO_EVENTS=1; [[ -z "$RUNTIME" ]] && RUNTIME="skip"; shift ;;
+    --send-demo-events) SEND_DEMO_EVENTS=1; shift ;;
+    --doctor)         ACTION="doctor"; shift ;;
+    --publisher-only) ACTION="publisher"; SKIP_STACK=1; shift ;;
     --noninteractive) NONINTERACTIVE=1; shift ;;
     --dir)            HOOKBUS_DIR="${2:-}"; shift 2 ;;
     --dir=*)          HOOKBUS_DIR="${1#*=}"; shift ;;
@@ -78,6 +87,144 @@ ok()   { printf "%s* %s%s\n" "$C_G" "$*" "$C_RESET"; }
 warn() { printf "%s! %s%s\n" "$C_Y" "$*" "$C_RESET"; }
 die()  { printf "%sx %s%s\n" "$C_R" "$*" "$C_RESET" >&2; exit 1; }
 
+has_tty() { [[ -r /dev/tty && -w /dev/tty ]]; }
+
+ask_tty() {
+  local prompt="$1"
+  local default="${2:-}"
+  local answer
+  if ! has_tty; then
+    printf "%s" "$default"
+    return 0
+  fi
+  if [[ -n "$default" ]]; then
+    printf "%s [%s]: " "$prompt" "$default" > /dev/tty
+  else
+    printf "%s: " "$prompt" > /dev/tty
+  fi
+  IFS= read -r answer < /dev/tty || answer=""
+  printf "%s" "${answer:-$default}"
+}
+
+main_menu() {
+  cat > /dev/tty <<MENU
+
+${C_BOLD}HookBus Setup${C_RESET}
+  1) Quick CTO demo - install bus, CRE-AgentProtect Light, and sample events
+  2) Install HookBus + CRE-AgentProtect Light
+  3) Add publisher to existing HookBus
+  4) Run doctor
+  5) Send demo events to existing HookBus
+  6) Exit
+
+MENU
+  local choice
+  choice=$(ask_tty "Choice" "1")
+  case "$choice" in
+    1) ACTION="install"; SEND_DEMO_EVENTS=1; [[ -z "$RUNTIME" ]] && RUNTIME="skip" ;;
+    2) ACTION="install" ;;
+    3) ACTION="publisher"; SKIP_STACK=1 ;;
+    4) ACTION="doctor" ;;
+    5) ACTION="demo-events" ;;
+    6) exit 0 ;;
+    *) warn "Unknown choice '$choice', using Quick CTO demo."; ACTION="install"; SEND_DEMO_EVENTS=1; [[ -z "$RUNTIME" ]] && RUNTIME="skip" ;;
+  esac
+}
+
+select_runtime() {
+  if [[ -n "$RUNTIME" || "$NONINTERACTIVE" = "1" ]]; then
+    [[ -z "$RUNTIME" ]] && RUNTIME="skip"
+    return 0
+  fi
+
+  if has_tty; then
+    cat > /dev/tty <<MENU
+
+${C_BOLD}Which agent runtime do you want to wire into HookBus?${C_RESET}
+  1) Claude Code (Anthropic, subprocess hook)
+  2) Codex CLI   (OpenAI, hook runner)
+  3) Amp Code    (Sourcegraph, TypeScript plugin)
+  4) OpenCode    (server plugin + wrapper)
+  5) Hermes      (Nous Research, Python plugin)
+  6) OpenClaw    (Node plugin)
+  7) Skip        (wire publishers manually later)
+
+MENU
+    local choice
+    choice=$(ask_tty "Choice" "7")
+    case "$choice" in
+      1) RUNTIME="claude-code" ;;
+      2) RUNTIME="codex" ;;
+      3) RUNTIME="amp" ;;
+      4) RUNTIME="opencode" ;;
+      5) RUNTIME="hermes" ;;
+      6) RUNTIME="openclaw" ;;
+      7|"") RUNTIME="skip" ;;
+      *) warn "Unknown choice '$choice', skipping publisher step"; RUNTIME="skip" ;;
+    esac
+  else
+    warn "No TTY for interactive prompt. Re-run with --runtime claude-code|codex|amp|opencode|hermes|openclaw|skip. Skipping for now."
+    RUNTIME="skip"
+  fi
+}
+
+load_existing_context() {
+  ENV_FILE="$HOOKBUS_DIR/.env"
+  [[ -f "$ENV_FILE" ]] || die "No HookBus env file found at $ENV_FILE. Run install first, or pass --dir to the existing HookBus install."
+  # shellcheck disable=SC1090
+  set -a; . "$ENV_FILE"; set +a
+  BUS_BASE="http://localhost:${HOOKBUS_PORT}"
+  DASH_URL="$BUS_BASE/?token=${HOOKBUS_TOKEN}"
+}
+
+send_demo_events() {
+  say "Sending demo events to $BUS_BASE..."
+  local ts
+  local demo_id
+  ts=$(date -Iseconds)
+  demo_id="demo-$(date +%s)"
+  curl -s -H "Authorization: Bearer $HOOKBUS_TOKEN" \
+       -H "Content-Type: application/json" \
+       -d '{"event_id":"'"$demo_id"'-session-start","event_type":"SessionStart","timestamp":"'"$ts"'","source":"hookbus-demo","session_id":"cto-demo","tool_name":"","tool_input":{},"metadata":{"demo":true,"scenario":"cto_quick_demo"}}' \
+       "$BUS_BASE/event" >/dev/null || warn "SessionStart demo event failed"
+  curl -s -H "Authorization: Bearer $HOOKBUS_TOKEN" \
+       -H "Content-Type: application/json" \
+       -d '{"event_id":"'"$demo_id"'-prompt","event_type":"UserPromptSubmit","timestamp":"'"$ts"'","source":"hookbus-demo","session_id":"cto-demo","tool_name":"","tool_input":{},"metadata":{"prompt":"Deploy the agent and show me what would be routed to policy subscribers.","demo":true}}' \
+       "$BUS_BASE/event" >/dev/null || warn "UserPromptSubmit demo event failed"
+  curl -s -H "Authorization: Bearer $HOOKBUS_TOKEN" \
+       -H "Content-Type: application/json" \
+       -d '{"event_id":"'"$demo_id"'-pretool","event_type":"PreToolUse","timestamp":"'"$ts"'","source":"hookbus-demo","session_id":"cto-demo","tool_name":"bash","tool_input":{"command":"rm -rf /production/customer-data"},"metadata":{"demo":true,"scenario":"dangerous_tool_call","expected":"policy subscriber can deny before execution"}}' \
+       "$BUS_BASE/event" >/dev/null || warn "PreToolUse demo event failed"
+  ok "Demo events sent. Open: $DASH_URL"
+}
+
+run_doctor() {
+  cat <<DOCTOR
+
+${C_BOLD}HookBus Doctor${C_RESET}
+DOCTOR
+  command -v docker >/dev/null && ok "docker found" || warn "docker not found"
+  docker info >/dev/null 2>&1 && ok "docker daemon responding" || warn "docker daemon not responding"
+  docker compose version >/dev/null 2>&1 && ok "docker compose found" || warn "docker compose plugin not found"
+  command -v git >/dev/null && ok "git found" || warn "git not found"
+  command -v openssl >/dev/null && ok "openssl found" || warn "openssl not found"
+  command -v curl >/dev/null && ok "curl found" || warn "curl not found"
+  if [[ -f "$HOOKBUS_DIR/.env" ]]; then
+    load_existing_context
+    ok "env file found: $ENV_FILE"
+    local root_status
+    root_status=$(curl -s -o /dev/null -w "%{http_code}" "$BUS_BASE/" 2>/dev/null || true)
+    if curl -sf -o /dev/null "$BUS_BASE/healthz" 2>/dev/null || [[ "$root_status" =~ ^(200|401)$ ]]; then
+      ok "bus responding: $BUS_BASE"
+      ok "dashboard: $DASH_URL"
+    else
+      warn "bus not responding on $BUS_BASE"
+    fi
+  else
+    warn "env file not found: $HOOKBUS_DIR/.env"
+  fi
+}
+
 # ----------------------------------------------------------------------------
 # Banner
 # ----------------------------------------------------------------------------
@@ -89,6 +236,27 @@ Apache 2.0 bus. CRE-AgentProtect Light adapter. Docker-based, 15 seconds to firs
 Docs: https://github.com/agentic-thinking/hookbus
 
 BANNER
+
+if [[ -z "$ACTION" && -z "$RUNTIME" && "$NONINTERACTIVE" = "0" ]] && has_tty; then
+  main_menu
+fi
+
+ACTION="${ACTION:-install}"
+
+if [[ "$ACTION" = "doctor" ]]; then
+  run_doctor
+  exit 0
+fi
+
+if [[ "$ACTION" = "demo-events" ]]; then
+  load_existing_context
+  send_demo_events
+  exit 0
+fi
+
+if [[ "$ACTION" = "publisher" ]]; then
+  SKIP_STACK=1
+fi
 
 # ----------------------------------------------------------------------------
 # Pre-flight
@@ -110,7 +278,16 @@ command -v git >/dev/null || \
 command -v openssl >/dev/null || \
   die "openssl not found (needed for token generation)."
 
-ok "Docker + compose + git OK"
+command -v curl >/dev/null || \
+  die "curl not found."
+
+ok "Docker + compose + git + curl OK"
+
+if [[ "$SKIP_STACK" = "1" ]]; then
+  say "Using existing HookBus install at $HOOKBUS_DIR"
+  load_existing_context
+  ok "Existing bus context ready: $BUS_BASE"
+else
 
 # ----------------------------------------------------------------------------
 # Clone or update the bus repo
@@ -174,39 +351,12 @@ fi
 
 DASH_URL="$BUS_BASE/?token=${HOOKBUS_TOKEN}"
 
+fi
+
 # ----------------------------------------------------------------------------
 # Publisher selection
 # ----------------------------------------------------------------------------
-if [[ -z "$RUNTIME" && "$NONINTERACTIVE" = "0" ]]; then
-  if [[ -t 0 ]]; then
-    cat <<MENU
-
-${C_BOLD}Which agent runtime do you want to wire into HookBus?${C_RESET}
-  1) Claude Code (Anthropic, subprocess hook)
-  2) Codex CLI   (OpenAI, hook runner)
-  3) Amp Code    (Sourcegraph, TypeScript plugin)
-  4) OpenCode    (server plugin + wrapper)
-  5) Hermes      (Nous Research, Python plugin)
-  6) OpenClaw    (Node plugin)
-  7) Skip        (wire publishers manually later)
-
-MENU
-    read -r -p "Choice [1-7]: " choice
-    case "$choice" in
-      1) RUNTIME="claude-code" ;;
-      2) RUNTIME="codex" ;;
-      3) RUNTIME="amp" ;;
-      4) RUNTIME="opencode" ;;
-      5) RUNTIME="hermes" ;;
-      6) RUNTIME="openclaw" ;;
-      7|"") RUNTIME="skip" ;;
-      *) warn "Unknown choice '$choice', skipping publisher step"; RUNTIME="skip" ;;
-    esac
-  else
-    warn "No TTY for interactive prompt. Re-run with --runtime claude-code|codex|amp|opencode|hermes|openclaw|skip. Skipping for now."
-    RUNTIME="skip"
-  fi
-fi
+select_runtime
 
 # ----------------------------------------------------------------------------
 # Install chosen publisher
@@ -384,6 +534,10 @@ case "$RUNTIME" in
   skip|"")     warn "Skipped publisher install. See $HOOKBUS_REPO for the full shim table." ;;
   *)           warn "Unsupported runtime '$RUNTIME'. Accepted: claude-code, codex, amp, opencode, hermes, openclaw, skip." ;;
 esac
+
+if [[ "$SEND_DEMO_EVENTS" = "1" ]]; then
+  send_demo_events
+fi
 
 # ----------------------------------------------------------------------------
 # Final summary

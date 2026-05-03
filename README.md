@@ -12,7 +12,7 @@
 
 ## Install (60 seconds)
 
-One shell command clones the bus, pulls HookBus + CRE-AgentProtect Light as public Docker images, bootstraps a bearer token, and starts the stack. Interactive menu lets you pick a publisher shim for your agent runtime. CRE-AgentProtect Light is a policy enforcement adapter for Microsoft AGT.
+One shell command opens a terminal UI, then clones the bus, pulls HookBus + CRE-AgentProtect Light as public Docker images, bootstraps a bearer token, and starts the stack. The guided path can run a CTO demo, add a publisher, run diagnostics, or send sample events. CRE-AgentProtect Light is a policy enforcement adapter for Microsoft AGT.
 
 ```bash
 curl -fsSL https://hookbus.com/install.sh | bash
@@ -21,6 +21,9 @@ curl -fsSL https://hookbus.com/install.sh | bash
 Non-interactive variants:
 
 ```bash
+# Quick CTO demo with sample events
+curl -fsSL https://hookbus.com/install.sh | bash -s -- --demo
+
 # Claude Code users
 curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime claude-code
 
@@ -41,6 +44,12 @@ curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime openclaw
 
 # Bus + subscribers only, skip publisher
 curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime skip --noninteractive
+
+# Add a publisher to an existing HookBus install
+curl -fsSL https://hookbus.com/install.sh | bash -s -- --publisher-only --runtime codex
+
+# Check local install health
+curl -fsSL https://hookbus.com/install.sh | bash -s -- --doctor
 
 # Clean side-by-side install when you already have ~/.hookbus or another stack
 curl -fsSL https://hookbus.com/install.sh | bash -s -- --dir ./hookbus-light --port 18810 --runtime claude-code --noninteractive
