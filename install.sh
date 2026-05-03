@@ -536,11 +536,17 @@ ${C_G}${C_BOLD}HookBus Light is running.${C_RESET}
   ${C_BOLD}Docs:${C_RESET}       https://github.com/agentic-thinking/hookbus
   ${C_BOLD}Profile:${C_RESET}    HookBus + CRE-AgentProtect Light$([[ "$WITH_AGENTSPEND" = "1" ]] && printf " + AgentSpend")
 
-Install another publisher against this bus:
+Clean-machine next step:
+  Run this installer again and choose:
+    2) Add publisher to existing HookBus
+
+Install publishers directly:
   curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime claude-code
   curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime codex
   curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime amp
   curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime opencode
+  curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime hermes
+  curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime openclaw
 
 Smoke test a manual event:
   set -a

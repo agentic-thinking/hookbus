@@ -18,6 +18,20 @@ One shell command opens a terminal UI, then clones the bus, pulls HookBus + CRE-
 curl -fsSL https://hookbus.com/install.sh | bash
 ```
 
+On a clean machine, use the terminal UI in two passes:
+
+```bash
+# 1. Install HookBus + CRE-AgentProtect Light
+curl -fsSL https://hookbus.com/install.sh | bash
+
+# Choose: 1) Install HookBus + CRE-AgentProtect Light
+
+# 2. Re-run to add publishers to that bus
+curl -fsSL https://hookbus.com/install.sh | bash
+
+# Choose: 2) Add publisher to existing HookBus
+```
+
 Non-interactive variants:
 
 ```bash
