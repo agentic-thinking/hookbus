@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# HookBus one-shot installer.
+# HookBus Light one-shot installer.
 # Usage:
 #   curl -fsSL https://hookbus.com/install.sh | bash
 #   curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime claude-code
+#   curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime codex
+#   curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime amp
+#   curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime opencode
 #   curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime skip --noninteractive
 #
 # Clones the bus, pulls HookBus + CRE-AgentProtect Light as public Docker
@@ -22,6 +25,7 @@ RUNTIME="${RUNTIME:-}"
 NONINTERACTIVE="${NONINTERACTIVE:-0}"
 WITH_AGENTSPEND="${WITH_AGENTSPEND:-0}"
 HOOKBUS_PORT="${HOOKBUS_PORT:-18800}"
+AGENTSPEND_PORT="${AGENTSPEND_PORT:-8883}"
 
 # Parse args (supported after `--` when piped from curl | bash)
 while [[ $# -gt 0 ]]; do
@@ -33,6 +37,8 @@ while [[ $# -gt 0 ]]; do
     --dir=*)          HOOKBUS_DIR="${1#*=}"; shift ;;
     --port)           HOOKBUS_PORT="${2:-}"; shift 2 ;;
     --port=*)         HOOKBUS_PORT="${1#*=}"; shift ;;
+    --agentspend-port) AGENTSPEND_PORT="${2:-}"; shift 2 ;;
+    --agentspend-port=*) AGENTSPEND_PORT="${1#*=}"; shift ;;
     --with-agentspend) WITH_AGENTSPEND=1; shift ;;
     --profile)
       profile="${2:-light}"
@@ -77,7 +83,7 @@ die()  { printf "%sx %s%s\n" "$C_R" "$*" "$C_RESET" >&2; exit 1; }
 # ----------------------------------------------------------------------------
 cat <<BANNER
 
-${C_BOLD}HookBus installer${C_RESET}
+${C_BOLD}HookBus Light installer${C_RESET}
 Open-source event bus for AI agent lifecycle governance.
 Apache 2.0 bus. CRE-AgentProtect Light adapter. Docker-based, 15 seconds to first event.
 Docs: https://github.com/agentic-thinking/hookbus
@@ -143,7 +149,7 @@ fi
 
 # shellcheck disable=SC1090
 set -a; . "$ENV_FILE"; set +a
-export HOOKBUS_PORT
+export HOOKBUS_PORT AGENTSPEND_PORT
 
 # ----------------------------------------------------------------------------
 # Start the stack
@@ -177,23 +183,27 @@ if [[ -z "$RUNTIME" && "$NONINTERACTIVE" = "0" ]]; then
 
 ${C_BOLD}Which agent runtime do you want to wire into HookBus?${C_RESET}
   1) Claude Code (Anthropic, subprocess hook)
-  2) Hermes      (Nous Research, Python plugin)
-  3) OpenClaw    (Node plugin)
-  4) Codex CLI   (OpenAI, hook runner)
-  5) Skip        (wire publishers manually later)
+  2) Codex CLI   (OpenAI, hook runner)
+  3) Amp Code    (Sourcegraph, TypeScript plugin)
+  4) OpenCode    (server plugin + wrapper)
+  5) Hermes      (Nous Research, Python plugin)
+  6) OpenClaw    (Node plugin)
+  7) Skip        (wire publishers manually later)
 
 MENU
-    read -r -p "Choice [1-5]: " choice
+    read -r -p "Choice [1-7]: " choice
     case "$choice" in
       1) RUNTIME="claude-code" ;;
-      2) RUNTIME="hermes" ;;
-      3) RUNTIME="openclaw" ;;
-      4) RUNTIME="codex" ;;
-      5|"") RUNTIME="skip" ;;
+      2) RUNTIME="codex" ;;
+      3) RUNTIME="amp" ;;
+      4) RUNTIME="opencode" ;;
+      5) RUNTIME="hermes" ;;
+      6) RUNTIME="openclaw" ;;
+      7|"") RUNTIME="skip" ;;
       *) warn "Unknown choice '$choice', skipping publisher step"; RUNTIME="skip" ;;
     esac
   else
-    warn "No TTY for interactive prompt. Re-run with --runtime claude-code|codex|hermes|openclaw|skip. Skipping for now."
+    warn "No TTY for interactive prompt. Re-run with --runtime claude-code|codex|amp|opencode|hermes|openclaw|skip. Skipping for now."
     RUNTIME="skip"
   fi
 fi
@@ -254,7 +264,7 @@ install_codex() {
   local TMP_DIR
   TMP_DIR=$(mktemp -d)
 
-  git clone --quiet https://github.com/agentic-thinking/hookbus-publisher-codex.git "$TMP_DIR/src" || {
+  git clone --quiet --depth 1 https://github.com/agentic-thinking/hookbus-publisher-codex.git "$TMP_DIR/src" || {
     warn "clone failed"; rm -rf "$TMP_DIR"; return 1
   }
 
@@ -269,6 +279,59 @@ install_codex() {
 
   Verify:
     $HOME/.local/bin/codex-gate --doctor
+HINT
+}
+
+install_amp() {
+  say "Installing Amp publisher..."
+  local TMP_DIR
+  TMP_DIR=$(mktemp -d)
+
+  git clone --quiet --depth 1 https://github.com/agentic-thinking/hookbus-publisher-amp.git "$TMP_DIR/src" || {
+    warn "clone failed"; rm -rf "$TMP_DIR"; return 1
+  }
+
+  (cd "$TMP_DIR/src" && HOOKBUS_URL="$BUS_BASE/event" HOOKBUS_TOKEN="$HOOKBUS_TOKEN" HOOKBUS_FAIL_MODE=open bash install.sh <<< 'n' 2>&1 | tail -14) || {
+    warn "Amp publisher install had issues"; rm -rf "$TMP_DIR"; return 1
+  }
+  rm -rf "$TMP_DIR"
+
+  ok "Amp publisher installed."
+  cat <<HINT
+  Next: launch Amp with the HookBus plugin enabled:
+    amp-hookbus
+
+  Plain 'amp' remains unaffected. Config lives at:
+    $HOME/.config/amp/plugins/hookbus.env
+HINT
+}
+
+install_opencode() {
+  say "Installing OpenCode publisher..."
+  if ! command -v node >/dev/null; then
+    warn "node is required for the OpenCode publisher. Install Node.js 18+ and re-run with --runtime opencode."
+    return 1
+  fi
+
+  local TMP_DIR
+  TMP_DIR=$(mktemp -d)
+
+  git clone --quiet --depth 1 https://github.com/agentic-thinking/hookbus-publisher-opencode.git "$TMP_DIR/src" || {
+    warn "clone failed"; rm -rf "$TMP_DIR"; return 1
+  }
+
+  (cd "$TMP_DIR/src" && HOOKBUS_URL="$BUS_BASE/event" HOOKBUS_TOKEN="$HOOKBUS_TOKEN" HOOKBUS_FAIL_MODE=open bash install.sh 2>&1 | tail -18) || {
+    warn "OpenCode publisher install had issues"; rm -rf "$TMP_DIR"; return 1
+  }
+  rm -rf "$TMP_DIR"
+
+  ok "OpenCode publisher installed."
+  cat <<HINT
+  Next: launch OpenCode normally:
+    opencode
+
+  Or run a deterministic smoke test:
+    opencode-agenthook run "Reply OK"
 HINT
 }
 
@@ -314,10 +377,12 @@ HINT
 case "$RUNTIME" in
   claude-code) install_claude_code || warn "Claude Code publisher install had issues." ;;
   codex)       install_codex       || warn "Codex publisher install had issues." ;;
+  amp)         install_amp         || warn "Amp publisher install had issues." ;;
+  opencode)    install_opencode    || warn "OpenCode publisher install had issues." ;;
   hermes)      install_hermes      || warn "Hermes publisher install had issues." ;;
   openclaw)    install_openclaw    || warn "OpenClaw publisher install had issues." ;;
   skip|"")     warn "Skipped publisher install. See $HOOKBUS_REPO for the full shim table." ;;
-  *)           warn "Unsupported runtime '$RUNTIME'. Accepted: claude-code, codex, hermes, openclaw, skip." ;;
+  *)           warn "Unsupported runtime '$RUNTIME'. Accepted: claude-code, codex, amp, opencode, hermes, openclaw, skip." ;;
 esac
 
 # ----------------------------------------------------------------------------
@@ -325,23 +390,20 @@ esac
 # ----------------------------------------------------------------------------
 cat <<DONE
 
-${C_G}${C_BOLD}HookBus is running.${C_RESET}
+${C_G}${C_BOLD}HookBus Light is running.${C_RESET}
 
-  ${C_BOLD}Bus API:${C_RESET}   $BUS_BASE
+  ${C_BOLD}Dashboard:${C_RESET}  $DASH_URL
   ${C_BOLD}Token:${C_RESET}      saved in $ENV_FILE (chmod 600)
   ${C_BOLD}Compose:${C_RESET}    cd $HOOKBUS_DIR && docker compose ps
   ${C_BOLD}Stop:${C_RESET}       cd $HOOKBUS_DIR && docker compose down
   ${C_BOLD}Docs:${C_RESET}       https://github.com/agentic-thinking/hookbus
   ${C_BOLD}Profile:${C_RESET}    HookBus + CRE-AgentProtect Light$([[ "$WITH_AGENTSPEND" = "1" ]] && printf " + AgentSpend")
-  ${C_BOLD}Dashboard:${C_RESET}  Enterprise UI: https://github.com/agentic-thinking/hookbus-dashboard-enterprise
 
 Install another publisher against this bus:
-  set -a
-  source "$ENV_FILE"
-  set +a
-  export HOOKBUS_URL=$BUS_BASE/event
-  curl -fsSL https://hookbus.com/publishers/claude-code | bash
-  curl -fsSL https://hookbus.com/publishers/codex | bash
+  curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime claude-code
+  curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime codex
+  curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime amp
+  curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime opencode
 
 Smoke test a manual event:
   set -a
