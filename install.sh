@@ -9,8 +9,8 @@
 #   curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime skip --noninteractive
 #
 # Clones the bus, pulls HookBus + CRE-AgentProtect Light as public Docker
-# images, bootstraps a bearer token, starts the stack, and optionally installs
-# the publisher plugin for your chosen agent runtime.
+# images, clones the dashboard UI, bootstraps a bearer token, starts the stack,
+# and optionally installs the publisher plugin for your chosen agent runtime.
 #
 # Idempotent. Safe to re-run. Apache 2.0 + MIT throughout.
 
@@ -21,11 +21,13 @@ set -euo pipefail
 # ----------------------------------------------------------------------------
 HOOKBUS_DIR="${HOOKBUS_DIR:-$HOME/hookbus-light}"
 HOOKBUS_REPO="${HOOKBUS_REPO:-https://github.com/agentic-thinking/hookbus.git}"
+DASHBOARD_REPO="${DASHBOARD_REPO:-https://github.com/agentic-thinking/hookbus-dashboard-enterprise.git}"
 RUNTIME="${RUNTIME:-}"
 NONINTERACTIVE="${NONINTERACTIVE:-0}"
 WITH_AGENTSPEND="${WITH_AGENTSPEND:-0}"
 HOOKBUS_PORT="${HOOKBUS_PORT:-18800}"
 AGENTSPEND_PORT="${AGENTSPEND_PORT:-8883}"
+DASHBOARD_PORT="${DASHBOARD_PORT:-8901}"
 ACTION="${ACTION:-}"
 SEND_TEST_EVENT="${SEND_TEST_EVENT:-0}"
 SKIP_STACK="${SKIP_STACK:-0}"
@@ -47,6 +49,8 @@ while [[ $# -gt 0 ]]; do
     --port=*)         HOOKBUS_PORT="${1#*=}"; shift ;;
     --agentspend-port) AGENTSPEND_PORT="${2:-}"; shift 2 ;;
     --agentspend-port=*) AGENTSPEND_PORT="${1#*=}"; shift ;;
+    --dashboard-port) DASHBOARD_PORT="${2:-}"; shift 2 ;;
+    --dashboard-port=*) DASHBOARD_PORT="${1#*=}"; shift ;;
     --with-agentspend) WITH_AGENTSPEND=1; shift ;;
     --profile)
       profile="${2:-light}"
@@ -315,19 +319,35 @@ fi
 
 # shellcheck disable=SC1090
 set -a; . "$ENV_FILE"; set +a
-export HOOKBUS_PORT AGENTSPEND_PORT
+export HOOKBUS_PORT AGENTSPEND_PORT DASHBOARD_PORT
+
+# ----------------------------------------------------------------------------
+# Clone or update the dashboard repo
+# ----------------------------------------------------------------------------
+DASHBOARD_DIR="$HOOKBUS_DIR/hookbus-dashboard-enterprise"
+if [[ -d "$DASHBOARD_DIR/.git" ]]; then
+  say "Updating dashboard at $DASHBOARD_DIR"
+  (cd "$DASHBOARD_DIR" && git pull --quiet --rebase origin main) || \
+    warn "dashboard git pull failed; keeping existing tree"
+elif [[ -e "$DASHBOARD_DIR" ]]; then
+  warn "Dashboard path exists but is not a git checkout: $DASHBOARD_DIR"
+  warn "Keeping existing path and trying docker compose build."
+else
+  say "Cloning dashboard to $DASHBOARD_DIR"
+  git clone --quiet "$DASHBOARD_REPO" "$DASHBOARD_DIR"
+fi
 
 # ----------------------------------------------------------------------------
 # Start the stack
 # ----------------------------------------------------------------------------
 if [[ "$WITH_AGENTSPEND" = "1" ]]; then
-  say "Starting HookBus + CRE-AgentProtect Light + AgentSpend..."
+  say "Starting HookBus + CRE-AgentProtect Light + AgentSpend + Dashboard..."
   HOOKBUS_SUBSCRIBERS_FILE=./subscribers.with-agentspend.yaml COMPOSE_PROFILES=agentspend docker compose pull hookbus cre-agentprotect agentspend 2>&1 | tail -10 || warn "docker compose pull had issues; using local images"
   HOOKBUS_SUBSCRIBERS_FILE=./subscribers.with-agentspend.yaml COMPOSE_PROFILES=agentspend docker compose up -d 2>&1 | tail -10 || die "docker compose failed"
 else
-  say "Starting HookBus + CRE-AgentProtect Light..."
+  say "Starting HookBus + CRE-AgentProtect Light + Dashboard..."
   docker compose pull hookbus cre-agentprotect 2>&1 | tail -10 || warn "docker compose pull had issues; using local images"
-  docker compose up -d hookbus cre-agentprotect 2>&1 | tail -10 || die "docker compose failed"
+  docker compose up -d hookbus cre-agentprotect dashboard 2>&1 | tail -10 || die "docker compose failed"
 fi
 
 sleep 3
@@ -341,6 +361,7 @@ else
 fi
 
 BUS_URL="$BUS_BASE/?token=${HOOKBUS_TOKEN}"
+DASHBOARD_URL="http://localhost:${DASHBOARD_PORT}"
 
 fi
 
@@ -522,6 +543,8 @@ if [[ "$SEND_TEST_EVENT" = "1" ]]; then
   send_test_event
 fi
 
+DASHBOARD_URL="${DASHBOARD_URL:-http://localhost:${DASHBOARD_PORT}}"
+
 # ----------------------------------------------------------------------------
 # Final summary
 # ----------------------------------------------------------------------------
@@ -530,6 +553,7 @@ cat <<DONE
 ${C_G}${C_BOLD}HookBus Light is running.${C_RESET}
 
   ${C_BOLD}Bus API:${C_RESET}   $BUS_URL
+  ${C_BOLD}Dashboard:${C_RESET} $DASHBOARD_URL
   ${C_BOLD}Token:${C_RESET}      saved in $ENV_FILE (chmod 600)
   ${C_BOLD}Compose:${C_RESET}    cd $HOOKBUS_DIR && docker compose ps
   ${C_BOLD}Stop:${C_RESET}       cd $HOOKBUS_DIR && docker compose down
