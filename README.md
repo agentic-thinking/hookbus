@@ -12,7 +12,7 @@
 
 ## Install (60 seconds)
 
-One shell command opens a terminal UI, then clones the bus, pulls HookBus + CRE-AgentProtect Light as public Docker images, bootstraps a bearer token, and starts the stack. The guided path can install the bus, add a publisher, run diagnostics, or send one safe smoke event. CRE-AgentProtect Light is a policy enforcement adapter for Microsoft AGT.
+One shell command opens a terminal UI, then clones the bus, pulls HookBus + CRE-AgentProtect Light as public Docker images, bootstraps a bearer token, starts the stack, and builds the local dashboard. The guided path can install the bus, add a publisher, run diagnostics, or send one safe smoke event. CRE-AgentProtect Light is a policy enforcement adapter for Microsoft AGT.
 
 ```bash
 curl -fsSL https://hookbus.com/install.sh | bash
@@ -72,7 +72,7 @@ curl -fsSL https://hookbus.com/install.sh | bash -s -- --dir ./hookbus-light --p
 curl -fsSL https://hookbus.com/install.sh | bash -s -- --with-agentspend
 ```
 
-The script prints the bus API URL + bearer token location on completion. Re-run any time, it is idempotent.
+The script prints the bus API URL, dashboard URL, and bearer token location on completion. Re-run any time, it is idempotent.
 
 _Prefer not to pipe curl to bash? Inspect first:_ `curl -fsSL https://hookbus.com/install.sh > install.sh && less install.sh && bash install.sh`
 
@@ -138,6 +138,8 @@ Point the shim at your bus:
 ```bash
 export HOOKBUS_URL=http://localhost:18800/event
 ```
+
+Hermes note: `hermes-agent` loads `~/.hermes/.env` before the project `.env`, so the installer writes HookBus settings to both `~/.hermes/.env` and `~/hermes-agent/.env`. If Hermes is posting to an old port, re-run the installer or update both files.
 
 Envelope spec is CC0 public domain, see Zenodo DOI `10.5281/zenodo.19642020`.
 
@@ -272,25 +274,33 @@ See the [architecture paper](https://doi.org/10.5281/zenodo.19642020) Section 15
 
 ## Troubleshooting
 
-### I regenerated the bus token and now my Hermes (or other shim) keeps getting 401
+### I regenerated the bus token or changed ports and now Hermes keeps missing the bus
 
-The shim reads `HOOKBUS_TOKEN` from its environment. If you or the wrapper wrote
-an old token into a `.env` file (for example `~/.hermes/.env`), that file wins
-over the shell-exported value. After `docker compose down -v && up -d` the bus
-writes a fresh token, but the shim still sends the old one.
+The shim reads `HOOKBUS_URL` and `HOOKBUS_TOKEN` from its environment. If you or
+the wrapper wrote an old value into a `.env` file (for example
+`~/.hermes/.env`), that file wins over the shell-exported value. After
+`docker compose down -v && up -d` the bus writes a fresh token, but the shim may
+still send the old token or post to an old port.
 
 Fix:
 
 ```bash
-# Remove any stale HOOKBUS_TOKEN line from the shim's .env
-sed -i '/^HOOKBUS_TOKEN=/d' ~/.hermes/.env 2>/dev/null || true
-sed -i '/^HOOKBUS_TOKEN=/d' ~/hermes-agent/.env 2>/dev/null || true
+# Remove any stale HookBus lines from Hermes env files
+sed -i '/^HOOKBUS_/d' ~/.hermes/.env 2>/dev/null || true
+sed -i '/^HOOKBUS_/d' ~/hermes-agent/.env 2>/dev/null || true
 
-# Re-read the current token and export fresh
+# Re-read the current token and export fresh values
+export HOOKBUS_URL=http://localhost:18800/event
 export HOOKBUS_TOKEN=$(docker compose exec -T hookbus cat /root/.hookbus/.token)
 ```
 
-Run the shim again. Events should land.
+Then re-run the Hermes publisher installer:
+
+```bash
+curl -fsSL https://hookbus.com/install.sh | bash -s -- --publisher-only --runtime hermes
+```
+
+Events should land.
 
 ### AgentSpend container restarts repeatedly on first boot
 
