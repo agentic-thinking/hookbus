@@ -96,11 +96,25 @@ upsert_env_value() {
   local key="$1"
   local value="$2"
   local file="$3"
+  mkdir -p "$(dirname "$file")"
+  touch "$file"
   if grep -q "^${key}=" "$file" 2>/dev/null; then
     sed -i "s#^${key}=.*#${key}=${value}#" "$file"
   else
     printf "%s=%s\n" "$key" "$value" >> "$file"
   fi
+}
+
+configure_hermes_hookbus_env() {
+  local env_file
+  for env_file in "$HOME/.hermes/.env" "$HOME/hermes-agent/.env"; do
+    upsert_env_value HOOKBUS_URL "$BUS_BASE/event" "$env_file"
+    upsert_env_value HOOKBUS_TOKEN "$HOOKBUS_TOKEN" "$env_file"
+    upsert_env_value HOOKBUS_TIMEOUT "10" "$env_file"
+    upsert_env_value HOOKBUS_FAIL_MODE "open" "$env_file"
+    upsert_env_value HOOKBUS_SOURCE "hermes-agent" "$env_file"
+    chmod 600 "$env_file" 2>/dev/null || true
+  done
 }
 
 ask_tty() {
@@ -407,12 +421,15 @@ install_hermes() {
   }
   rm -rf "$TMP_DIR"
 
+  configure_hermes_hookbus_env
+
   ok "Hermes publisher installed."
   cat <<HINT
   Next: restart Hermes and run:
     hermes chat --tui
 
-  The publisher installer writes HookBus settings to:
+  HookBus settings were written to:
+    $HOME/.hermes/.env
     $HOME/hermes-agent/.env
 HINT
 }
