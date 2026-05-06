@@ -92,6 +92,17 @@ die()  { printf "%sx %s%s\n" "$C_R" "$*" "$C_RESET" >&2; exit 1; }
 
 has_tty() { [[ -r /dev/tty && -w /dev/tty ]]; }
 
+upsert_env_value() {
+  local key="$1"
+  local value="$2"
+  local file="$3"
+  if grep -q "^${key}=" "$file" 2>/dev/null; then
+    sed -i "s#^${key}=.*#${key}=${value}#" "$file"
+  else
+    printf "%s=%s\n" "$key" "$value" >> "$file"
+  fi
+}
+
 ask_tty() {
   local prompt="$1"
   local default="${2:-}"
@@ -312,6 +323,9 @@ else
   {
     echo "# HookBus env, generated $(date -Iseconds)"
     echo "HOOKBUS_TOKEN=$TOKEN"
+    echo "HOOKBUS_PORT=$HOOKBUS_PORT"
+    echo "AGENTSPEND_PORT=$AGENTSPEND_PORT"
+    echo "DASHBOARD_PORT=$DASHBOARD_PORT"
   } > "$ENV_FILE"
   chmod 600 "$ENV_FILE"
   ok "Generated new bearer token in $ENV_FILE"
@@ -319,6 +333,9 @@ fi
 
 # shellcheck disable=SC1090
 set -a; . "$ENV_FILE"; set +a
+upsert_env_value HOOKBUS_PORT "$HOOKBUS_PORT" "$ENV_FILE"
+upsert_env_value AGENTSPEND_PORT "$AGENTSPEND_PORT" "$ENV_FILE"
+upsert_env_value DASHBOARD_PORT "$DASHBOARD_PORT" "$ENV_FILE"
 export HOOKBUS_PORT AGENTSPEND_PORT DASHBOARD_PORT
 
 # ----------------------------------------------------------------------------
