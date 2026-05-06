@@ -343,10 +343,12 @@ fi
 if [[ "$WITH_AGENTSPEND" = "1" ]]; then
   say "Starting HookBus + CRE-AgentProtect Light + AgentSpend + Dashboard..."
   HOOKBUS_SUBSCRIBERS_FILE=./subscribers.with-agentspend.yaml COMPOSE_PROFILES=agentspend docker compose pull hookbus cre-agentprotect agentspend 2>&1 | tail -10 || warn "docker compose pull had issues; using local images"
+  HOOKBUS_SUBSCRIBERS_FILE=./subscribers.with-agentspend.yaml COMPOSE_PROFILES=agentspend docker compose build dashboard 2>&1 | tail -12 || die "dashboard build failed"
   HOOKBUS_SUBSCRIBERS_FILE=./subscribers.with-agentspend.yaml COMPOSE_PROFILES=agentspend docker compose up -d 2>&1 | tail -10 || die "docker compose failed"
 else
   say "Starting HookBus + CRE-AgentProtect Light + Dashboard..."
   docker compose pull hookbus cre-agentprotect 2>&1 | tail -10 || warn "docker compose pull had issues; using local images"
+  docker compose build dashboard 2>&1 | tail -12 || die "dashboard build failed"
   docker compose up -d hookbus cre-agentprotect dashboard 2>&1 | tail -10 || die "docker compose failed"
 fi
 
