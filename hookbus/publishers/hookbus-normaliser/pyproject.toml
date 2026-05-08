@@ -1,0 +1,9 @@
+[project]
+name = "hookbus-normaliser"
+version = "0.1.0"
+description = "Shared AgentHook normalisation layer for HookBus publishers"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
