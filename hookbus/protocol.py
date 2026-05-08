@@ -199,6 +199,7 @@ class SubscriberResponse:
         "subscriber": "cre-gate",
         "decision": "deny",
         "reason": "Force push blocked by enterprise policy",
+        "preprompt": "Context to inject into the agent before it continues",
         "metadata": {}
     }
     """
@@ -206,6 +207,7 @@ class SubscriberResponse:
     subscriber: str
     decision: str
     reason: str = ""
+    preprompt: str = ""
     metadata: dict = field(default_factory=dict)
 
     def to_json(self) -> str:
@@ -230,6 +232,7 @@ class SubscriberResponse:
             subscriber=data["subscriber"],
             decision=data["decision"],
             reason=data.get("reason", ""),
+            preprompt=data.get("preprompt", ""),
             metadata=data.get("metadata", {})
         )
 
@@ -299,6 +302,25 @@ def consolidate_decisions(responses: list[SubscriberResponse]) -> tuple[Decision
     if has_ask:
         return Decision.ASK, combined_reason
     return Decision.ALLOW, combined_reason
+
+
+def consolidate_preprompts(responses: list[SubscriberResponse]) -> str:
+    """Combine subscriber-provided context blocks for publisher injection.
+
+    This is intentionally separate from `reason`: policy reasons explain why
+    a decision was made, while preprompt text is context the publisher may
+    inject into an agent runtime before execution. Subscribers that do not
+    provide context simply leave `preprompt` empty.
+    """
+    blocks = []
+    seen = set()
+    for response in responses:
+        text = (response.preprompt or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        blocks.append(text)
+    return "\n\n".join(blocks)
 
 # ---------------------------------------------------------------------------
 # Well-known metadata keys for LLM-call events

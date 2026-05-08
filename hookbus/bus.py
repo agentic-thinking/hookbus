@@ -291,6 +291,7 @@ from .protocol import (
     Decision,
     DateTimeEncoder,
     consolidate_decisions,
+    consolidate_preprompts,
     validate_reasoning_content,
     validate_correlation_id,
 )
@@ -631,7 +632,7 @@ class Bus:
         
         return None  # Async subscriber returned None
 
-    async def route_event(self, event: HookEvent) -> tuple[Decision, str]:
+    async def route_event_detailed(self, event: HookEvent) -> tuple[Decision, str, str]:
         """
         Route an event to all matching subscribers and consolidate decisions.
         
@@ -641,7 +642,7 @@ class Bus:
             event: The event to route
             
         Returns:
-            Tuple of (consolidated decision, combined reason)
+            Tuple of (consolidated decision, combined reason, combined preprompt)
         """
         import time
         _t0 = time.time()
@@ -649,7 +650,7 @@ class Bus:
         if not matching:
             logger.debug(f"No subscribers for event type: {event.event_type}")
             self.state.record_event(event, Decision.ALLOW, "No subscribers matched", responses=[], latency_ms=(time.time()-_t0)*1000.0)
-            return Decision.ALLOW, "No subscribers matched"
+            return Decision.ALLOW, "No subscribers matched", ""
         
         logger.info(
             f"Routing event {event.event_id} ({event.event_type}) "
@@ -709,7 +710,7 @@ class Bus:
                 logger.warning("Sync subscriber timeout")
                 if not self.fail_open:
                     self.state.record_event(event, Decision.DENY, "Timeout exceeded", responses=responses, latency_ms=(time.time()-_t0)*1000.0)
-                    return Decision.DENY, "Timeout exceeded"
+                    return Decision.DENY, "Timeout exceeded", consolidate_preprompts(responses)
         
         # Fan out to async subscribers without waiting
         for subscriber in async_subscribers:
@@ -719,7 +720,18 @@ class Bus:
         
         # Consolidate decisions
         decision, reason = consolidate_decisions(responses)
+        preprompt = consolidate_preprompts(responses)
         self.state.record_event(event, decision, reason, responses=responses, latency_ms=(time.time()-_t0)*1000.0)
+        return decision, reason, preprompt
+
+    async def route_event(self, event: HookEvent) -> tuple[Decision, str]:
+        """Backward-compatible route_event API.
+
+        Existing callers expect `(decision, reason)`. New HTTP publishers use
+        `route_event_detailed` through `/event` and receive `preprompt` as a
+        first-class field in the JSON response.
+        """
+        decision, reason, _preprompt = await self.route_event_detailed(event)
         return decision, reason
 
     async def handle_http_request(
@@ -805,12 +817,14 @@ class Bus:
                         status=400,
                     )
 
-            decision, reason = await self.route_event(event)
+            decision, reason, preprompt = await self.route_event_detailed(event)
 
             return aiohttp.web.json_response({
                 "event_id": event.event_id,
                 "decision": decision.value,
-                "reason": reason
+                "reason": reason,
+                "preprompt": preprompt,
+                "additional_context": preprompt,
             })
 
         except Exception as e:
