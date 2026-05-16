@@ -8,7 +8,7 @@
 #   curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime opencode
 #   curl -fsSL https://hookbus.com/install.sh | bash -s -- --runtime skip --noninteractive
 #
-# Clones the bus, pulls HookBus + CRE-AgentProtect Light as public Docker
+# Clones the bus, pulls HookBus + AgentProtect Light as public Docker
 # images, clones the dashboard UI, bootstraps a bearer token, starts the stack,
 # and optionally installs the publisher plugin for your chosen agent runtime.
 #
@@ -138,7 +138,7 @@ main_menu() {
   cat > /dev/tty <<MENU
 
 ${C_BOLD}HookBus Setup${C_RESET}
-  1) Install HookBus + CRE-AgentProtect Light
+  1) Install HookBus + AgentProtect Light
   2) Add publisher to existing HookBus
   3) Run doctor
   4) Send safe test event to existing HookBus
@@ -250,7 +250,7 @@ cat <<BANNER
 
 ${C_BOLD}HookBus Light installer${C_RESET}
 Open-source event bus for AI agent lifecycle governance.
-Apache 2.0 bus. CRE-AgentProtect Light adapter. Docker-based, 15 seconds to first event.
+Apache 2.0 bus. AgentProtect Light adapter. Docker-based, 15 seconds to first event.
 Docs: https://github.com/agentic-thinking/hookbus
 
 BANNER
@@ -372,12 +372,12 @@ fi
 # Start the stack
 # ----------------------------------------------------------------------------
 if [[ "$WITH_AGENTSPEND" = "1" ]]; then
-  say "Starting HookBus + CRE-AgentProtect Light + AgentSpend + Dashboard..."
+  say "Starting HookBus + AgentProtect Light + AgentSpend + Dashboard..."
   HOOKBUS_SUBSCRIBERS_FILE=./subscribers.with-agentspend.yaml COMPOSE_PROFILES=agentspend docker compose pull hookbus cre-agentprotect agentspend 2>&1 | tail -10 || warn "docker compose pull had issues; using local images"
   HOOKBUS_SUBSCRIBERS_FILE=./subscribers.with-agentspend.yaml COMPOSE_PROFILES=agentspend docker compose build dashboard 2>&1 | tail -12 || die "dashboard build failed"
   HOOKBUS_SUBSCRIBERS_FILE=./subscribers.with-agentspend.yaml COMPOSE_PROFILES=agentspend docker compose up -d 2>&1 | tail -10 || die "docker compose failed"
 else
-  say "Starting HookBus + CRE-AgentProtect Light + Dashboard..."
+  say "Starting HookBus + AgentProtect Light + Dashboard..."
   docker compose pull hookbus cre-agentprotect 2>&1 | tail -10 || warn "docker compose pull had issues; using local images"
   docker compose build dashboard 2>&1 | tail -12 || die "dashboard build failed"
   docker compose up -d hookbus cre-agentprotect dashboard 2>&1 | tail -10 || die "docker compose failed"
@@ -594,7 +594,7 @@ ${C_G}${C_BOLD}HookBus Light is running.${C_RESET}
   ${C_BOLD}Compose:${C_RESET}    cd $HOOKBUS_DIR && docker compose ps
   ${C_BOLD}Stop:${C_RESET}       cd $HOOKBUS_DIR && docker compose down
   ${C_BOLD}Docs:${C_RESET}       https://github.com/agentic-thinking/hookbus
-  ${C_BOLD}Profile:${C_RESET}    HookBus + CRE-AgentProtect Light$([[ "$WITH_AGENTSPEND" = "1" ]] && printf " + AgentSpend")
+  ${C_BOLD}Profile:${C_RESET}    HookBus + AgentProtect Light$([[ "$WITH_AGENTSPEND" = "1" ]] && printf " + AgentSpend")
 
 Clean-machine next step:
   Run this installer again and choose:
