@@ -27,6 +27,7 @@ class NormaliserConfig:
     agentflow_url: str = "http://localhost:8893"
     agentflow_approval_timeout: int = 900
     agentflow_poll_interval: float = 2.0
+    agentflow_wait_for_approval: bool = True
     approval_actor: str = "email-approval"
     publisher_name: str = "hookbus-normaliser"
     publisher_version: str = "0.1.0"
@@ -41,6 +42,7 @@ class NormaliserConfig:
             agentflow_url=os.environ.get("AGENTFLOW_URL", "http://localhost:8893").rstrip("/"),
             agentflow_approval_timeout=int(os.environ.get("AGENTFLOW_APPROVAL_TIMEOUT", "900")),
             agentflow_poll_interval=float(os.environ.get("AGENTFLOW_POLL_INTERVAL", "2")),
+            agentflow_wait_for_approval=os.environ.get("AGENTFLOW_WAIT_FOR_APPROVAL", "1").lower() not in {"0", "false", "no", "off"},
             approval_actor=os.environ.get("AGENTFLOW_APPROVAL_ACTOR", "email-approval"),
             publisher_name=os.environ.get("HOOKBUS_NORMALISER_NAME", "hookbus-normaliser"),
             publisher_version=os.environ.get("HOOKBUS_NORMALISER_VERSION", "0.1.0"),
@@ -110,6 +112,15 @@ class HookBusNormaliser:
         preprompt = result.get("preprompt") or result.get("additional_context") or ""
 
         if decision == "ask" and event.event_type == "PreToolUse":
+            if not self.config.agentflow_wait_for_approval:
+                return NormalisedResult(
+                    "ask",
+                    reason=reason,
+                    preprompt=preprompt,
+                    additional_context=result.get("additional_context") or "",
+                    raw=result,
+                    exit_code=0,
+                )
             return self.wait_for_agentflow(envelope, result, reason)
         if decision == "deny":
             return NormalisedResult("deny", reason=reason, preprompt=preprompt, raw=result, exit_code=2)

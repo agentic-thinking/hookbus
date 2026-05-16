@@ -89,13 +89,16 @@ export default async function handler() {
   // Ask (PreToolUse semantics only)
   if (decision === "ask") {
     if (hook === "PreToolUse") {
+      const approvalReason = `Approval required: ${reason || "HookBus approval required"}`;
       emit({
         hookSpecificOutput: {
           hookEventName: "PreToolUse",
-          permissionDecision: "ask",
+          permissionDecision: "deny",
+          permissionDecisionReason: approvalReason,
           additionalContext: reason,
         },
       });
+      return 2;
     } else {
       emit({});
     }

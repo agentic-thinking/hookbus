@@ -124,13 +124,16 @@ def main():
     # Ask is PreToolUse-only
     if decision == "ask":
         if hook == "PreToolUse":
+            approval_reason = reason or "HookBus approval required"
             print(json.dumps({
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
-                    "permissionDecision": "ask",
-                    "additionalContext": reason,
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": f"Approval required: {approval_reason}",
+                    "additionalContext": approval_reason,
                 }
             }))
+            sys.exit(2)
         else:
             print(json.dumps({}))
         sys.exit(0)
