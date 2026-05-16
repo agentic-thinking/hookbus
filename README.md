@@ -12,7 +12,7 @@
 
 ## Install (60 seconds)
 
-One shell command opens a terminal UI, then clones the bus, pulls HookBus + CRE-AgentProtect Light as public Docker images, bootstraps a bearer token, starts the stack, and builds the local dashboard. The guided path can install the bus, add a publisher, run diagnostics, or send one safe smoke event. CRE-AgentProtect Light is a policy enforcement adapter for Microsoft AGT.
+One shell command opens a terminal UI, then clones the bus, pulls HookBus + AgentProtect Light as public Docker images, bootstraps a bearer token, starts the stack, and builds the local dashboard. The guided path can install the bus, add a publisher, run diagnostics, or send one safe smoke event. AgentProtect Light is a policy enforcement adapter for Microsoft AGT.
 
 ```bash
 curl -fsSL https://hookbus.com/install.sh | bash
@@ -21,10 +21,10 @@ curl -fsSL https://hookbus.com/install.sh | bash
 On a clean machine, use the terminal UI in two passes:
 
 ```bash
-# 1. Install HookBus + CRE-AgentProtect Light
+# 1. Install HookBus + AgentProtect Light
 curl -fsSL https://hookbus.com/install.sh | bash
 
-# Choose: 1) Install HookBus + CRE-AgentProtect Light
+# Choose: 1) Install HookBus + AgentProtect Light
 
 # 2. Re-run to add publishers to that bus
 curl -fsSL https://hookbus.com/install.sh | bash
@@ -110,7 +110,7 @@ That pulls `ghcr.io/agentic-thinking/hookbus:latest` and `cre-agentprotect:lates
 
 Open `http://localhost:18800/?token=$HOOKBUS_TOKEN` in your browser to confirm the bus is alive and view the API links.
 
-That brings up **HookBus™** + **CRE-AgentProtect Light** (Microsoft AGT policy adapter), talking via the Compose network. Auth is on by default, see the [Security](#security) section below for pinning your own token, reverse-proxy recipes, and production hardening.
+That brings up **HookBus™** + **AgentProtect Light** (Microsoft AGT policy adapter), talking via the Compose network. Auth is on by default, see the [Security](#security) section below for pinning your own token, reverse-proxy recipes, and production hardening.
 
 ## Install a publisher shim for your agent runtime
 

@@ -6,7 +6,7 @@ Working backlog of subscriber ideas and their architectural tier. Discussed 2026
 
 | Tier | Pattern | Blocking? | Examples today | Key risk |
 |---|---|---|---|---|
-| 1. Hard gates | Sync subscriber returns `allow`/`deny`/`ask` | ✅ yes | CRE-AgentProtect, DLP Filter | latency on every event |
+| 1. Hard gates | Sync subscriber returns `allow`/`deny`/`ask` | ✅ yes | AgentProtect Light, DLP Filter | latency on every event |
 | 2. Skill-injection | Subscriber returns `allow + context: "load skill X"` | ❌ advisory | (none yet) | LLM can ignore or be prompt-injected |
 | 3. Index / Vault | Async, persists state, queryable by other subscribers | ❌ observational | (none yet) | storage growth, content sensitivity |
 | 4. Integration (external SaaS) | Async fan-out to webhook / third-party | ❌ observational | (none yet) | data sovereignty, PII leaving the perimeter |
@@ -17,7 +17,7 @@ Subscribers in a given tier compose: a bus can host many hard gates + many skill
 
 ## Tier 1: Hard gates (already shipping / in-flight)
 
-- ✅ **CRE-AgentProtect**: Microsoft AGT L1 policy engine. Shipped.
+- ✅ **AgentProtect Light**: Microsoft AGT L1 policy engine. Shipped.
 - ✅ **AgentSpend**: token/cost tracking (observational, not gate). Shipped.
 - 🟡 **DLP Filter**: regex-based secret/PII redaction at envelope boundary. Enterprise tier, running in a development deployment.
 - 🟡 **Auditor**: hash-chained immutable event log for SOC 2 / EU AI Act Art. 12. Enterprise tier, running in a development deployment.
@@ -131,7 +131,7 @@ Each is a small subscriber wrapping the generic webhook shape with platform-spec
 
 - **Backpressure.** If a slow subscriber falls behind, events must either queue (async tier) or fail-open/fail-closed per config (sync tier). Bus should not block on async subscribers.
 
-- **Enterprise-tier gating.** Tier 3 (Vault) and most of Tier 4 live in Enterprise. Light ships with only Tier 1 (CRE-AgentProtect, AgentSpend). Document the boundary.
+- **Enterprise-tier gating.** Tier 3 (Vault) and most of Tier 4 live in Enterprise. Light ships with only Tier 1 (AgentProtect Light, AgentSpend). Document the boundary.
 
 ---
 

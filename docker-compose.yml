@@ -1,7 +1,7 @@
 # HookBus Light. The open-source runtime governance layer for autonomous AI agents.
 #
-# Starts HookBus on :18800 (bus API), dashboard on :8901, and CRE-AgentProtect Light:
-#   CRE-AgentProtect (policy enforcement adapter for Microsoft AGT, sync)
+# Starts HookBus on :18800 (bus API), dashboard on :8901, and AgentProtect Light:
+#   AgentProtect Light (policy enforcement adapter for Microsoft AGT, sync)
 #
 # Optional:
 #   COMPOSE_PROFILES=agentspend docker compose up -d
