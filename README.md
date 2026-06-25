@@ -2,11 +2,13 @@
 
 > **HookBus™, the agent-to-agent event bus.** Route governance-aware lifecycle events between any AI agent publisher and any subscriber, with priority-weighted deny-wins consolidation at the bus layer.
 
-**Apache 2.0.** Production-ready. Zero runtime dependencies beyond Python stdlib + aiohttp + PyYAML.
+**Apache 2.0.** Developer preview and public reference implementation. Zero runtime dependencies beyond Python stdlib + aiohttp + PyYAML.
 
 ![licence](https://img.shields.io/badge/licence-Apache%202.0-blue)
 ![python](https://img.shields.io/badge/python-3.10%2B-green)
 ![docker](https://img.shields.io/badge/docker-agentic-thinking%2Fhookbus-blue)
+
+> **Project status, June 2026:** HookBus is active and being hardened in public. Recent work focuses on fail-closed governance semantics, publisher compatibility, AgentProtect Light integration, and evidence/audit reliability. Use it for development, evaluation, and controlled pilots; review `SECURITY.md` before putting it in front of sensitive workflows.
 
 ---
 

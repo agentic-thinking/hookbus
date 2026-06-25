@@ -411,8 +411,20 @@ class Bus:
             h['Authorization'] = f'Bearer {self._bus_token}'
         return h
 
-    def _load_config(self) -> None:
-        """Load subscriber configuration from YAML file."""
+    def _load_config(self, target_subscribers=None, target_handlers=None) -> bool:
+        """Load subscriber configuration from YAML file.
+        
+        Args:
+            target_subscribers: Optional list to populate (defaults to self._subscribers).
+                Used by hot reload to load into a temp list before swapping.
+            target_handlers: Optional dict to populate (defaults to self._in_process_handlers).
+        
+        Returns:
+            True if the config file was read and parsed successfully, False otherwise.
+        """
+        subs = target_subscribers if target_subscribers is not None else self._subscribers
+        handlers = target_handlers if target_handlers is not None else self._in_process_handlers
+        
         config_file = Path(self.config_path)
         
         if not config_file.exists():
@@ -421,32 +433,47 @@ class Bus:
         
         if not config_file.exists():
             logger.warning(f"Config file not found: {self.config_path}")
-            return
+            return False
         
-        with open(config_file, "r") as f:
-            config = yaml.safe_load(f)
+        try:
+            with open(config_file, "r") as f:
+                config = yaml.safe_load(f)
+        except Exception as e:
+            logger.error(f"Failed to load config file {config_file}: {e}")
+            return False
+        
+        if not isinstance(config, dict):
+            logger.error(f"Config file {config_file} did not parse to a dict")
+            return False
         
         subscribers = config.get("subscribers", [])
         for sub_config in subscribers:
             try:
                 subscriber = SubscriberConfig(**sub_config)
-                self._subscribers.append(subscriber)
+                subs.append(subscriber)
                 logger.info(f"Loaded subscriber: {subscriber.name} ({subscriber.type})")
                 
                 # Pre-load in-process handlers
                 if subscriber.transport == "in_process":
-                    self._load_in_process_handler(subscriber)
+                    self._load_in_process_handler(subscriber, target_handlers=handlers)
                     
             except ValueError as e:
                 logger.error(f"Invalid subscriber config: {e}")
+        return True
 
-    def _load_in_process_handler(self, subscriber: SubscriberConfig) -> None:
-        """Load an in-process subscriber module."""
+    def _load_in_process_handler(self, subscriber: SubscriberConfig, target_handlers=None) -> None:
+        """Load an in-process subscriber module.
+        
+        Args:
+            subscriber: Subscriber configuration.
+            target_handlers: Optional dict to populate (defaults to self._in_process_handlers).
+        """
+        handlers = target_handlers if target_handlers is not None else self._in_process_handlers
         try:
             module_path, class_name = subscriber.module.rsplit(".", 1)
             module = importlib.import_module(module_path)
             handler_class = getattr(module, class_name)
-            self._in_process_handlers[subscriber.name] = handler_class()
+            handlers[subscriber.name] = handler_class()
             logger.info(f"Loaded in-process handler: {subscriber.name}")
         except Exception as e:
             logger.error(f"Failed to load in-process handler {subscriber.name}: {e}")
@@ -700,17 +727,33 @@ class Bus:
                     timeout=max(s.timeout for s in sync_subscribers) + 1
                 )
                 
-                for response in sync_responses:
+                for subscriber, response in zip(sync_subscribers, sync_responses):
                     if isinstance(response, SubscriberResponse):
                         responses.append(response)
-                    elif isinstance(response, Exception):
-                        logger.error(f"Sync subscriber failed: {response}")
+                    else:
+                        # Missing or failed sync subscriber — apply fail policy
+                        failure_decision = "allow" if self.fail_open else "deny"
+                        failure_reason = f"subscriber {subscriber.name} failed to respond"
+                        if isinstance(response, Exception):
+                            logger.error(f"Sync subscriber failed: {response}")
+                        responses.append(SubscriberResponse(
+                            event_id=event.event_id,
+                            subscriber=subscriber.name,
+                            decision=failure_decision,
+                            reason=failure_reason,
+                        ))
                         
             except asyncio.TimeoutError:
                 logger.warning("Sync subscriber timeout")
-                if not self.fail_open:
-                    self.state.record_event(event, Decision.DENY, "Timeout exceeded", responses=responses, latency_ms=(time.time()-_t0)*1000.0)
-                    return Decision.DENY, "Timeout exceeded", consolidate_preprompts(responses)
+                # Inject failure responses for all sync subscribers on timeout
+                failure_decision = "allow" if self.fail_open else "deny"
+                for subscriber in sync_subscribers:
+                    responses.append(SubscriberResponse(
+                        event_id=event.event_id,
+                        subscriber=subscriber.name,
+                        decision=failure_decision,
+                        reason=f"timeout waiting for subscriber {subscriber.name}",
+                    ))
         
         # Fan out to async subscribers without waiting
         for subscriber in async_subscribers:
@@ -943,9 +986,18 @@ class Bus:
             return
         """Reload subscriber configuration (hot reload)."""
         logger.info("Reloading subscriber configuration...")
+        new_subscribers: list[SubscriberConfig] = []
+        new_in_process: dict[str, object] = {}
+        ok = self._load_config(target_subscribers=new_subscribers, target_handlers=new_in_process)
+        if not ok:
+            logger.error("Hot reload aborted: config load failed, preserving current subscribers")
+            return
+        # Swap only on success — bad YAML/imports preserve current subscribers
         self._subscribers.clear()
+        self._subscribers.extend(new_subscribers)
         self._in_process_handlers.clear()
-        self._load_config()
+        self._in_process_handlers.update(new_in_process)
+        logger.info(f"Reloaded {len(self._subscribers)} subscribers")
 
     @property
     def subscribers(self) -> list[SubscriberConfig]:
@@ -1000,7 +1052,9 @@ def _run_server() -> None:
     import os
     port = int(os.environ.get("HOOKBUS_PORT", "18800"))
     config_path = os.environ.get("HOOKBUS_CONFIG", "").strip() or None
-    bus = Bus(config_path=config_path)
+    fail_open_raw = os.environ.get("HOOKBUS_FAIL_OPEN", "0").strip().lower()
+    fail_open = fail_open_raw in ("1", "true", "yes")
+    bus = Bus(config_path=config_path, fail_open=fail_open)
 
     async def _boot():
         await bus.start_server(host="0.0.0.0", port=port)
