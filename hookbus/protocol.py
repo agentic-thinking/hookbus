@@ -9,7 +9,8 @@ Version: 1.0
 
 import json
 import uuid
-from dataclasses import dataclass, field, asdict
+from copy import deepcopy
+from dataclasses import dataclass, field, fields, asdict
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Any
@@ -92,14 +93,19 @@ class HookEvent:
     agent_id: str = ""
     correlation_id: str = ""
     annotations: dict = field(default_factory=dict)
+    _extensions: dict = field(default_factory=dict, init=False, repr=False, compare=False)
 
     def to_json(self) -> str:
         """Serialize event to JSON string matching spec format."""
         return json.dumps(self.to_dict(), cls=DateTimeEncoder)
 
     def to_dict(self) -> dict:
-        """Convert event to dictionary."""
-        return asdict(self)
+        """Forward opaque extension fields without interpreting their policy."""
+        known = asdict(self)
+        extensions = known.pop("_extensions")
+        # Transport-owned fields cannot be overridden by extension storage.
+        extensions.update(known)
+        return extensions
 
     @classmethod
     def from_json(cls, json_str: str) -> "HookEvent":
@@ -112,7 +118,7 @@ class HookEvent:
         """Create event from dictionary. Unknown schema_version values are
         accepted so consumers built against an older protocol still process
         newer events on best-effort terms; never reject on version alone."""
-        return cls(
+        event = cls(
             event_id=data["event_id"],
             event_type=data["event_type"],
             timestamp=data["timestamp"],
@@ -126,6 +132,9 @@ class HookEvent:
             correlation_id=data.get("correlation_id", ""),
             annotations=data.get("annotations", {}),
         )
+        known = {item.name for item in fields(cls) if item.init}
+        event._extensions = {key: deepcopy(value) for key, value in data.items() if key not in known}
+        return event
 
     @classmethod
     def create(
