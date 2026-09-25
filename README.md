@@ -1,6 +1,8 @@
 # HookBus™
 
-> **HookBus™, the agent-to-agent event bus.** Route governance-aware lifecycle events between any AI agent publisher and any subscriber, with priority-weighted deny-wins consolidation at the bus layer.
+> **HookBus™ is an open-source event bus that captures what AI agents do.** It carries [AgentHook](https://agenthook.org) lifecycle events from any agent runtime to independent subscribers outside the agent, with priority-weighted deny-wins consolidation for subscribers that return decisions.
+>
+> HookBus is maintained by [Agentic Thinking](https://agenticthinking.uk/research/), an independent research lab that records what AI agents do and investigates when it goes wrong. It is the capture instrument used in that research.
 
 **Apache 2.0.** Developer preview and public reference implementation. Zero runtime dependencies beyond Python stdlib + aiohttp + PyYAML.
 
@@ -8,7 +10,7 @@
 ![python](https://img.shields.io/badge/python-3.10%2B-green)
 ![docker](https://img.shields.io/badge/docker-agentic-thinking%2Fhookbus-blue)
 
-> **Project status, June 2026:** HookBus is active and being hardened in public. Recent work focuses on fail-closed governance semantics, publisher compatibility, AgentProtect Light integration, and evidence/audit reliability. Use it for development, evaluation, and controlled pilots; review `SECURITY.md` before putting it in front of sensitive workflows.
+> **Project status, September 2026:** HookBus is a developer preview and public reference implementation of AgentHook. Use it for development, evaluation and research; review `SECURITY.md` before putting it in front of sensitive workflows.
 
 ---
 
@@ -156,8 +158,6 @@ Envelope spec is CC0 public domain, see Zenodo DOI `10.5281/zenodo.19642020`.
 5. The publisher acts on the consolidated verdict (tool proceeds, is blocked, or prompts user)
 
 **Example in one turn:** a Hermes agent is about to run `rm -rf /important-dir`. The Hermes shim emits a `PreToolUse` event. A policy subscriber sees the destructive pattern and returns `deny`. The bus consolidates and returns `deny` to Hermes. The tool call never executes. The async audit subscriber records every step regardless of the verdict.
-
-Optimised for sub-10ms P99 in local deployments.
 
 ---
 
@@ -389,9 +389,9 @@ Mount an empty token file or set `HOOKBUS_TOKEN=` to empty, and the bus skips au
 
 ---
 
-## Commercial support
+## Licensing
 
-Production support, custom subscribers, compliance-grade audit evidence, and SLA-backed deployments are available from Agentic Thinking Limited. Contact [contact@agenticthinking.uk](mailto:contact@agenticthinking.uk).
+HookBus is Apache 2.0. Agentic Thinking does not sell support contracts for it. For patent or other licensing enquiries, contact [partnerships@agenticthinking.uk](mailto:partnerships@agenticthinking.uk).
 
 ---
 

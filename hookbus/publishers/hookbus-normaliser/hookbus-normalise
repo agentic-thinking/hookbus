@@ -4,7 +4,6 @@ from pathlib import Path
 
 for path in (
     Path.home() / ".local" / "share" / "hookbus-normaliser",
-    Path("/home/admin/projects/core/hookbus/hookbus/publishers/hookbus-normaliser"),
 ):
     text = str(path)
     if path.exists() and text not in sys.path:
